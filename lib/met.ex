@@ -60,7 +60,12 @@ defmodule Oban.Met do
   """
   @spec counts(oban_name(), count_opts() | filter_opts()) :: counts() | sub_counts()
   def counts(oban \\ Oban, opts \\ []) do
-    %{}
+    # validate the opts using Keyword.validate
+    # lookup the associated stats table
+    # select out the values that we need based on opts
+    # do the aggregation at this point using the values
+    #   - this central aggregation is the pure bit we want to test
+    #   - do we test at the top level, and keep the storage opaque?
   end
 
   @doc """
@@ -68,28 +73,26 @@ defmodule Oban.Met do
 
   Generate series data using the defaults of `series: :state, agg: :max, res: :seconds`:
 
-      Met.summary()
+      Met.window()
       # => [%{at: %DateTime{}, label: "available", value: 9}, %{at: %DateTime{}, label: "completed", value: 3}]
 
   Summarize by state, with a minimum aggregate and by minute:
 
-      Met.summary(series: :state, agg: :min, res: :minutes)
+      Met.window(series: :state, agg: :min, res: :minutes)
       # => [%{at: %DateTime{}, label: "available", value: 9}, %{at: %DateTime{}, label: "cancelled", value: 7}]
 
   Summarize by queue, using the median and an hourly resolution:
 
-      Met.summary(series: :queue, agg: :p50, res: :hours)
+      Met.window(series: :queue, agg: :p50, res: :hours)
       # => [%{at: %DateTime{}, label: "alpha", value: 4}, %{at: %DateTime{}, label: "gamma", value: 7}}]
 
   Summarize by execution time, using the 95th percentile and only for a couple of workers:
 
-      Met.summary(series: :ellapsed, agg: :p95, workers: ["WorkerA", "WorkerB"])
+      Met.window(series: :ellapsed, agg: :p95, workers: ["WorkerA", "WorkerB"])
       # => [%{at: %DateTime{}, label: "", value: 100}, %{at: %DateTime{}, label: "", value: 100}]
   """
-  @spec summary(oban_name, summary_opts() | filter_opts()) :: [
-          %{at: DateTime.t(), data: counts()}
-        ]
-  def summary(oban \\ Oban, opts \\ []) do
+  @spec window(oban_name, summary_opts() | filter_opts()) :: [%{at: DateTime.t(), data: counts()}]
+  def window(oban \\ Oban, opts \\ []) do
     []
   end
 end
