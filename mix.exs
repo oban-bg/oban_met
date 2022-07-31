@@ -21,7 +21,8 @@ defmodule Oban.Met.MixProject do
   defp deps do
     [
       {:oban, "~> 2.13"},
-      {:telemetry, "~> 1.1"}
+      {:telemetry, "~> 1.1"},
+      {:stream_data, "~> 0.5", only: [:test, :dev]}
     ]
   end
 end
