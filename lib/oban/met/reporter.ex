@@ -1,9 +1,6 @@
 defmodule Oban.Met.Reporter do
   @moduledoc """
   Track local telemetry events and periodically relay them to external recorders.
-
-  {{:count, :available}, 1, %{queue: "default"}}
-  {{:count, :scheduled}, 1, %{queue: "default"}}
   """
 
   use GenServer
@@ -26,36 +23,10 @@ defmodule Oban.Met.Reporter do
     GenServer.start_link(__MODULE__, opts, name: opts[:name])
   end
 
+  @doc false
   @spec all_metrics(GenSever.name()) :: [tuple()]
   def all_metrics(name) do
     GenServer.call(name, :all_metrics)
-  end
-
-  def handle_event([:oban, :job, :start], _measure, %{conf: conf} = meta, {conf, tab}) do
-    labels = %{queue: meta.job.queue}
-
-    for object <- [{{:count, :available}, -1, labels}, {{:count, :executing}, 1, labels}] do
-      insert_or_update(tab, object)
-    end
-  end
-
-  def handle_event([:oban, :job, _], _measure, %{conf: conf} = meta, {conf, tab}) do
-    labels = %{queue: meta.job.queue}
-
-    insert_or_update(tab, {{:count, :executing}, -1, labels})
-    insert_or_update(tab, {{:count, @trans_state[meta.state]}, 1, labels})
-  end
-
-  def handle_event(_event, _measure, _meta, _conf), do: :ok
-
-  defp insert_or_update(table, {key, value, _} = object) do
-    case :ets.lookup(table, key) do
-      [{^key, original, labels}] ->
-        :ets.insert(table, {key, original + value, labels})
-
-      [] ->
-        :ets.insert(table, object)
-    end
   end
 
   # Callbacks
@@ -76,8 +47,10 @@ defmodule Oban.Met.Reporter do
   end
 
   @impl GenServer
-  def terminate(_reason, %State{timer: timer}) do
+  def terminate(_reason, %State{timer: timer} = state) do
     if is_reference(timer), do: Process.cancel_timer(timer)
+
+    :telemetry.detach(handler_id(state))
 
     :ok
   end
@@ -87,7 +60,7 @@ defmodule Oban.Met.Reporter do
     metrics =
       table
       |> :ets.tab2list()
-      |> Enum.map(fn {key, value, labels} -> [Tuple.to_list(key), value, labels] end)
+      |> Enum.map(fn {labels, value} -> Map.put(labels, :value, value) end)
 
     :ets.delete_all_objects(table)
 
@@ -103,6 +76,8 @@ defmodule Oban.Met.Reporter do
     {:reply, :ets.tab2list(table), state}
   end
 
+  # Telemetry Events
+
   defp attach_events(%State{conf: conf, table: table} = state) do
     :telemetry.attach_many(
       handler_id(state),
@@ -114,13 +89,46 @@ defmodule Oban.Met.Reporter do
     state
   end
 
+  defp handler_id(state) do
+    "oban-met-recorder-#{inspect(state.name)}"
+  end
+
+  @doc false
+  def handle_event([:oban, :job, :start], _measure, %{conf: conf} = meta, {conf, tab}) do
+    insert_or_update(tab, [
+      {%{name: :available, queue: meta.job.queue, type: :count}, -1},
+      {%{name: :executing, queue: meta.job.queue, type: :count}, 1}
+    ])
+  end
+
+  def handle_event([:oban, :job, _], _measure, %{conf: conf} = meta, {conf, tab}) do
+    insert_or_update(tab, [
+      {%{name: :executing, queue: meta.job.queue, type: :count}, -1},
+      {%{name: @trans_state[meta.state], queue: meta.job.queue, type: :count}, 1}
+    ])
+  end
+
+  def handle_event(_event, _measure, _meta, _conf), do: :ok
+
+  defp insert_or_update(table, objects) when is_list(objects) do
+    for object <- objects, do: insert_or_update(table, object)
+  end
+
+  defp insert_or_update(table, {key, val} = object) do
+    case :ets.lookup(table, key) do
+      [{^key, old}] ->
+        :ets.insert(table, {key, old + val})
+
+      [] ->
+        :ets.insert(table, object)
+    end
+  end
+
+  # Scheduling
+
   defp schedule_report(state) do
     timer = Process.send_after(self(), :report, state.interval)
 
     %{state | timer: timer}
-  end
-
-  defp handler_id(state) do
-    "oban-met-recorder-#{inspect(state.name)}"
   end
 end
