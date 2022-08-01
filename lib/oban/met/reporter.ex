@@ -6,6 +6,7 @@ defmodule Oban.Met.Reporter do
   use GenServer
 
   alias __MODULE__, as: State
+  alias Oban.Met.Sketch
   alias Oban.Notifier
 
   defstruct [:conf, :name, :table, :timer, interval: :timer.seconds(1)]
@@ -101,10 +102,14 @@ defmodule Oban.Met.Reporter do
     ])
   end
 
-  def handle_event([:oban, :job, _], _measure, %{conf: conf} = meta, {conf, tab}) do
+  def handle_event([:oban, :job, _], measure, %{conf: conf} = meta, {conf, tab}) do
+    %{job: %{queue: queue, worker: worker}} = meta
+
     insert_or_update(tab, [
-      {%{name: :executing, queue: meta.job.queue, type: :count}, -1},
-      {%{name: @trans_state[meta.state], queue: meta.job.queue, type: :count}, 1}
+      {%{name: :executing, queue: queue, type: :count}, -1},
+      {%{name: @trans_state[meta.state], queue: queue, type: :count}, 1},
+      {%{name: :exec_time, queue: queue, type: :sketch, worker: worker}, measure.duration},
+      {%{name: :wait_time, queue: queue, type: :sketch, worker: worker}, measure.queue_time}
     ])
   end
 
@@ -114,13 +119,22 @@ defmodule Oban.Met.Reporter do
     for object <- objects, do: insert_or_update(table, object)
   end
 
-  defp insert_or_update(table, {key, val} = object) do
+  defp insert_or_update(table, {key, val}) do
     case :ets.lookup(table, key) do
-      [{^key, old}] ->
+      [{%{type: :count}, old}] ->
         :ets.insert(table, {key, old + val})
 
+      [{%{type: :sketch}, old}] ->
+        :ets.insert(table, {key, Sketch.insert(old, val)})
+
       [] ->
-        :ets.insert(table, object)
+        case key do
+          %{type: :count} ->
+            :ets.insert(table, {key, val})
+
+          %{type: :sketch} ->
+            :ets.insert(table, {key, Sketch.insert(Sketch.new(), val)})
+        end
     end
   end
 

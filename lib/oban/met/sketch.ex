@@ -12,7 +12,8 @@ defmodule Oban.Met.Sketch do
 
   alias __MODULE__, as: Sketch
 
-  defstruct data: %{}, size: 0, gamma: 0, inv_log_gamma: 0
+  @derive Jason.Encoder
+  defstruct data: %{}, gamma: 0, inv_log_gamma: 0, size: 0
 
   @doc """
   Create a new sketch instance with an optional error rate.
