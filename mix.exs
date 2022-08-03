@@ -6,10 +6,14 @@ defmodule Oban.Met.MixProject do
       app: :oban_met,
       version: "0.1.0",
       elixir: "~> 1.13",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_env), do: ["lib"]
 
   def application do
     [
@@ -22,6 +26,7 @@ defmodule Oban.Met.MixProject do
     [
       {:oban, "~> 2.13"},
       {:telemetry, "~> 1.1"},
+      {:benchee, "~> 1.0", only: [:test, :dev], runtime: false},
       {:stream_data, "~> 0.5", only: [:test, :dev]}
     ]
   end

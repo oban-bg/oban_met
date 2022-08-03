@@ -3,14 +3,12 @@ defmodule Oban.Met.Application do
 
   use Application
 
-  alias Oban.Met.Storage
-
   @handler_id :oban_met_handler
-  @supervisor Oban.Met.Supervisor
+  @supervisor Oban.Met.AppSup
 
   @impl Application
   def start(_type, _args) do
-    :telemetry.attach(@handler_id, [:oban, :supervisor, :init], &__MODULE__.init_storage/4, [])
+    :telemetry.attach(@handler_id, [:oban, :supervisor, :init], &__MODULE__.init_metrics/4, [])
 
     Supervisor.start_link([], strategy: :one_for_one, name: @supervisor)
   end
@@ -23,9 +21,7 @@ defmodule Oban.Met.Application do
   end
 
   @doc false
-  def init_storage(_event, _measure, %{conf: conf}, _conf) do
-    name = Oban.Registry.via(conf.name, Storage)
-
-    Supervisor.start_child(@supervisor, {Storage, conf: conf, name: name})
+  def init_metrics(_event, _measure, %{conf: conf}, _conf) do
+    Supervisor.start_child(@supervisor, {Oban.Met.Supervisor, conf: conf})
   end
 end
