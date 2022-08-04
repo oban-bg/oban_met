@@ -132,6 +132,26 @@ defmodule Oban.Met.Sketch do
     for {key, val} <- data, do: {2 * :math.pow(gamma, key) / (gamma + 1), val}
   end
 
+  @doc false
   @spec size(t()) :: non_neg_integer()
   def size(%Sketch{size: size}), do: size
+
+  @doc """
+  Initialize a sketch struct from a stringified map, e.g. encoded JSON.
+
+  ## Examples
+
+      iex> Oban.Met.Sketch.new()
+      ...> |> Oban.Met.Sketch.insert(1)
+      ...> |> Oban.Met.Sketch.insert(2)
+      ...> |> Jason.encode!()
+      ...> |> Jason.decode!()
+      ...> |> Oban.Met.Sketch.from_map()
+      ...> |> Oban.Met.Sketch.size()
+      2
+  """
+  @spec from_map(%{optional(String.t()) => term()}) :: t()
+  def from_map(%{"data" => data, "gamma" => gamma, "inv_log_gamma" => inv, "size" => size}) do
+    %Sketch{data: data, gamma: gamma, inv_log_gamma: inv, size: size}
+  end
 end
