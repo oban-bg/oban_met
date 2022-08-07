@@ -33,7 +33,7 @@ defmodule Oban.Met.ReporterTest do
 
     test "capturing job stop and exception counts", %{conf: conf, pid: pid} do
       meta = %{conf: conf, job: %Job{queue: "default"}, state: :success}
-      measure = %{duration: 1000, queue_time: 500}
+      measure = %{duration: 100000, queue_time: 50000}
 
       execute([:oban, :job, :stop], measure, meta)
       execute([:oban, :job, :stop], measure, meta)
@@ -69,9 +69,9 @@ defmodule Oban.Met.ReporterTest do
     test "capturing job stop measurements", %{conf: conf, pid: pid} do
       meta = %{conf: conf, job: %Job{queue: "default"}, state: :success}
 
-      execute([:oban, :job, :stop], %{duration: 10, queue_time: 10}, meta)
-      execute([:oban, :job, :stop], %{duration: 15, queue_time: 20}, meta)
-      execute([:oban, :job, :stop], %{duration: 10, queue_time: 10}, meta)
+      execute([:oban, :job, :stop], %{duration: 10000, queue_time: 10000}, meta)
+      execute([:oban, :job, :stop], %{duration: 15000, queue_time: 20000}, meta)
+      execute([:oban, :job, :stop], %{duration: 10000, queue_time: 10000}, meta)
 
       metrics = Reporter.all_metrics(pid)
 
@@ -90,7 +90,7 @@ defmodule Oban.Met.ReporterTest do
         meta = %{conf: conf, job: %Job{queue: "default", worker: "Worker.A"}, state: :success}
 
         execute([:oban, :job, :start], %{}, meta)
-        execute([:oban, :job, :stop], %{duration: 100, queue_time: 10}, meta)
+        execute([:oban, :job, :stop], %{duration: 100000, queue_time: 10000}, meta)
       end
 
       assert_receive {:notification, :gossip, payload}
