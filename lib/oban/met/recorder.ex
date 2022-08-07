@@ -106,16 +106,20 @@ defmodule Oban.Met.Recorder do
   def handle_info({:notification, :gossip, %{"metrics" => _} = payload}, %State{} = state) do
     %{"node" => node, "metrics" => metrics} = payload
 
-    for %{"name" => name, "value" => value} = labels <- metrics do
+    for %{"name" => name, "type" => type, "value" => value} = labels <- metrics do
       labels =
         labels
         |> Map.delete("value")
         |> Map.put("node", node)
         |> Map.update!("type", &if(&1 == "count", do: "delta", else: &1))
 
-      store(state.table, name, value, labels)
+      store(state.table, name, cast_value(value, type), labels)
     end
 
+    {:noreply, state}
+  end
+
+  def handle_info({:notification, :gossip, _payload}, state) do
     {:noreply, state}
   end
 
@@ -125,6 +129,9 @@ defmodule Oban.Met.Recorder do
 
     {:noreply, schedule_compact(state)}
   end
+
+  defp cast_value(%{"data" => _} = value, "sketch"), do: Sketch.from_map(value)
+  defp cast_value(value, _type), do: value
 
   # Scheduling
 

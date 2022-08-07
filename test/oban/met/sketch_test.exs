@@ -14,4 +14,26 @@ defmodule Oban.Met.SketchTest do
       assert Sketch.quantile(sketch, 0.5) > 0
     end
   end
+
+  property "encoded and decoded sketches retain the same values" do
+    check all error <- float(min: 0.01, max: 0.9), values <- list_of(positive_integer(), min_length: 1) do
+      sketch = Enum.reduce(values, Sketch.new(error: error), &Sketch.insert(&2, &1))
+
+      size = Sketch.size(sketch)
+      min = Sketch.quantile(sketch, 0.0)
+      med = Sketch.quantile(sketch, 0.5)
+      max = Sketch.quantile(sketch, 1.0)
+
+      sketch =
+        sketch
+        |> Jason.encode!()
+        |> Jason.decode!()
+        |> Sketch.from_map()
+
+      assert size == Sketch.size(sketch)
+      assert min == Sketch.quantile(sketch, 0.0)
+      assert med == Sketch.quantile(sketch, 0.5)
+      assert max == Sketch.quantile(sketch, 1.0)
+    end
+  end
 end

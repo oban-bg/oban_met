@@ -147,11 +147,14 @@ defmodule Oban.Met.Sketch do
       ...> |> Jason.encode!()
       ...> |> Jason.decode!()
       ...> |> Oban.Met.Sketch.from_map()
-      ...> |> Oban.Met.Sketch.size()
+      ...> |> Oban.Met.Sketch.quantile(1.0)
+      ...> |> floor()
       2
   """
   @spec from_map(%{optional(String.t()) => term()}) :: t()
   def from_map(%{"data" => data, "gamma" => gamma, "inv_log_gamma" => inv, "size" => size}) do
+    data = Map.new(data, fn {key, val} -> {String.to_integer(key), val} end)
+
     %Sketch{data: data, gamma: gamma, inv_log_gamma: inv, size: size}
   end
 end
