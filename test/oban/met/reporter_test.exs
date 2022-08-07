@@ -1,20 +1,25 @@
 defmodule Oban.Met.ReporterTest do
   use ExUnit.Case, async: true
 
-  alias Oban.{Config, Job, Registry}
-  alias Oban.Notifiers.PG, as: Notifier
+  alias Oban.{Job, Notifier}
   alias Oban.Met.{Reporter, Sketch}
 
   import :telemetry, only: [execute: 3]
 
-  @conf %Config{name: Oban, node: "worker.1", notifier: Notifier, prefix: "public", repo: nil}
+  @opts [
+    node: "worker.1",
+    notifier: Oban.Notifiers.PG,
+    prefix: "reporter",
+    repo: Oban.Met.Repo,
+    testing: :inline
+  ]
   @name Oban.Reporter
 
   describe "capturing" do
-    test "capturing job start counts" do
-      {:ok, pid} = start_supervised({Reporter, conf: @conf, name: @name})
+    setup :start_supervised_reporter
 
-      meta = %{conf: @conf, job: %Job{queue: "default"}}
+    test "capturing job start counts", %{conf: conf, pid: pid} do
+      meta = %{conf: conf, job: %Job{queue: "default"}}
 
       execute([:oban, :job, :start], %{}, meta)
       execute([:oban, :job, :start], %{}, meta)
@@ -26,10 +31,8 @@ defmodule Oban.Met.ReporterTest do
       assert -3 == find_metric(metrics, name: :available)
     end
 
-    test "capturing job stop and exception counts" do
-      {:ok, pid} = start_supervised({Reporter, conf: @conf, name: @name})
-
-      meta = %{conf: @conf, job: %Job{queue: "default"}, state: :success}
+    test "capturing job stop and exception counts", %{conf: conf, pid: pid} do
+      meta = %{conf: conf, job: %Job{queue: "default"}, state: :success}
       measure = %{duration: 1000, queue_time: 500}
 
       execute([:oban, :job, :stop], measure, meta)
@@ -49,11 +52,9 @@ defmodule Oban.Met.ReporterTest do
       assert 1 = find_metric(metrics, name: :scheduled)
     end
 
-    test "capturing counts separately for every queue" do
-      {:ok, pid} = start_supervised({Reporter, conf: @conf, name: @name})
-
-      meta_1 = %{conf: @conf, job: %Job{queue: "alpha"}}
-      meta_2 = %{conf: @conf, job: %Job{queue: "gamma"}}
+    test "capturing counts separately for every queue", %{conf: conf, pid: pid} do
+      meta_1 = %{conf: conf, job: %Job{queue: "alpha"}}
+      meta_2 = %{conf: conf, job: %Job{queue: "gamma"}}
 
       execute([:oban, :job, :start], %{}, meta_1)
       execute([:oban, :job, :start], %{}, meta_2)
@@ -65,10 +66,8 @@ defmodule Oban.Met.ReporterTest do
       assert 1 == find_metric(metrics, name: :executing, queue: "gamma")
     end
 
-    test "capturing job stop measurements" do
-      {:ok, pid} = start_supervised({Reporter, conf: @conf, name: @name})
-
-      meta = %{conf: @conf, job: %Job{queue: "default"}, state: :success}
+    test "capturing job stop measurements", %{conf: conf, pid: pid} do
+      meta = %{conf: conf, job: %Job{queue: "default"}, state: :success}
 
       execute([:oban, :job, :stop], %{duration: 10, queue_time: 10}, meta)
       execute([:oban, :job, :stop], %{duration: 15, queue_time: 20}, meta)
@@ -82,16 +81,13 @@ defmodule Oban.Met.ReporterTest do
   end
 
   describe "reporting" do
-    test "reporting captured metrics" do
-      name = Registry.via(@conf.name, Oban.Notifier)
+    setup :start_supervised_reporter
 
-      {:ok, pgn} = start_supervised({Notifier, conf: @conf, name: name})
-      {:ok, pid} = start_supervised({Reporter, conf: @conf, interval: 10, name: @name})
-
-      :ok = Notifier.listen(pgn, [:gossip])
+    test "reporting captured metrics", %{conf: conf, pid: pid} do
+      :ok = Notifier.listen(conf.name, [:gossip])
 
       for _ <- 1..3 do
-        meta = %{conf: @conf, job: %Job{queue: "default", worker: "Worker.A"}, state: :success}
+        meta = %{conf: conf, job: %Job{queue: "default", worker: "Worker.A"}, state: :success}
 
         execute([:oban, :job, :start], %{}, meta)
         execute([:oban, :job, :stop], %{duration: 100, queue_time: 10}, meta)
@@ -99,7 +95,7 @@ defmodule Oban.Met.ReporterTest do
 
       assert_receive {:notification, :gossip, payload}
 
-      assert %{"name" => "Oban", "node" => "worker.1", "metrics" => metrics} = payload
+      assert %{"name" => _, "node" => "worker.1", "metrics" => metrics} = payload
 
       metrics = Map.new(metrics, fn map -> {map["name"], map} end)
 
@@ -131,5 +127,15 @@ defmodule Oban.Met.ReporterTest do
       Enum.all?(fields, fn {key, val} -> Map.get(labels, key) == val end)
     end)
     |> elem(1)
+  end
+
+  defp start_supervised_reporter(_context) do
+    name = make_ref()
+    start_supervised!({Oban, Keyword.put(@opts, :name, name)})
+
+    conf = Oban.config(name)
+    pid = start_supervised!({Reporter, conf: conf, interval: 10, name: @name})
+
+    {:ok, conf: conf, pid: pid}
   end
 end

@@ -8,14 +8,15 @@ defmodule Oban.Met.Test do
       )
 
       with_backoff(fn ->
-        assert %{active: 1} = Supervisor.count_children(Oban.Met.AppSup)
+        assert %{active: active} = Supervisor.count_children(Oban.Met.AppSup)
+        assert active >= 1
       end)
     end
   end
 
   defp with_backoff(opts \\ [], fun) do
     total = Keyword.get(opts, :total, 100)
-    sleep = Keyword.get(opts, :sleep, 10)
+    sleep = Keyword.get(opts, :sleep, 1)
 
     with_backoff(fun, 0, total, sleep)
   end

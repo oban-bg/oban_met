@@ -19,6 +19,15 @@ defmodule Oban.Met.Reporter do
     snoozed: :scheduled
   }
 
+  @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
+  def child_spec(opts) do
+    name = Keyword.get(opts, :name, __MODULE__)
+
+    opts
+    |> super()
+    |> Map.put(:id, name)
+  end
+
   @spec start_link(Keyword.t()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: opts[:name])
