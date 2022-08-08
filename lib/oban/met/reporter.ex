@@ -114,14 +114,11 @@ defmodule Oban.Met.Reporter do
   def handle_event([:oban, :job, _], measure, %{conf: conf} = meta, {conf, tab}) do
     %{job: %{queue: queue, worker: worker}} = meta
 
-    exec_time = System.convert_time_unit(measure.duration, :nanosecond, :microsecond)
-    wait_time = System.convert_time_unit(measure.queue_time, :nanosecond, :microsecond)
-
     insert_or_update(tab, [
       {%{name: :executing, queue: queue, type: :count}, -1},
       {%{name: @trans_state[meta.state], queue: queue, type: :count}, 1},
-      {%{name: :exec_time, queue: queue, type: :sketch, worker: worker}, exec_time},
-      {%{name: :wait_time, queue: queue, type: :sketch, worker: worker}, wait_time}
+      {%{name: :exec_time, queue: queue, type: :sketch, worker: worker}, measure.duration},
+      {%{name: :wait_time, queue: queue, type: :sketch, worker: worker}, measure.queue_time}
     ])
   end
 
