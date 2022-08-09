@@ -70,13 +70,15 @@ defmodule Oban.Met.Reporter do
     metrics =
       table
       |> :ets.tab2list()
-      |> Enum.map(fn {labels, value} -> Map.put(labels, :value, value) end)
+      |> Enum.map(fn {labels, value} ->
+        labels
+        |> Map.put(:node, conf.node)
+        |> Map.put(:value, value)
+      end)
 
     :ets.delete_all_objects(table)
 
-    payload = %{name: inspect(conf.name), node: conf.node, metrics: metrics}
-
-    Notifier.notify(conf, :gossip, payload)
+    Notifier.notify(conf, :gossip, %{name: inspect(conf.name), metrics: metrics})
 
     {:noreply, schedule_report(state)}
   end
@@ -106,19 +108,20 @@ defmodule Oban.Met.Reporter do
   @doc false
   def handle_event([:oban, :job, :start], _measure, %{conf: conf} = meta, {conf, tab}) do
     insert_or_update(tab, [
-      {%{name: :available, queue: meta.job.queue, type: :count}, -1},
-      {%{name: :executing, queue: meta.job.queue, type: :count}, 1}
+      {%{name: :available, queue: meta.job.queue, type: :delta}, -1},
+      {%{name: :executing, queue: meta.job.queue, type: :delta}, 1}
     ])
   end
 
   def handle_event([:oban, :job, _], measure, %{conf: conf} = meta, {conf, tab}) do
     %{job: %{queue: queue, worker: worker}} = meta
+    %{duration: exec_time, queue_time: wait_time} = measure
 
     insert_or_update(tab, [
-      {%{name: :executing, queue: queue, type: :count}, -1},
-      {%{name: @trans_state[meta.state], queue: queue, type: :count}, 1},
-      {%{name: :exec_time, queue: queue, type: :sketch, worker: worker}, measure.duration},
-      {%{name: :wait_time, queue: queue, type: :sketch, worker: worker}, measure.queue_time}
+      {%{name: :executing, queue: queue, type: :delta}, -1},
+      {%{name: @trans_state[meta.state], queue: queue, type: :delta}, 1},
+      {%{name: :exec_time, queue: queue, type: :sketch, worker: worker}, exec_time},
+      {%{name: :wait_time, queue: queue, type: :sketch, worker: worker}, wait_time}
     ])
   end
 
@@ -130,7 +133,7 @@ defmodule Oban.Met.Reporter do
 
   defp insert_or_update(table, {key, val}) do
     case :ets.lookup(table, key) do
-      [{%{type: :count}, old}] ->
+      [{%{type: :delta}, old}] ->
         :ets.insert(table, {key, old + val})
 
       [{%{type: :sketch}, old}] ->
@@ -138,7 +141,7 @@ defmodule Oban.Met.Reporter do
 
       [] ->
         case key do
-          %{type: :count} ->
+          %{type: :delta} ->
             :ets.insert(table, {key, val})
 
           %{type: :sketch} ->

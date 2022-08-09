@@ -95,15 +95,16 @@ defmodule Oban.Met.ReporterTest do
 
       assert_receive {:notification, :gossip, payload}
 
-      assert %{"name" => _, "node" => "worker.1", "metrics" => metrics} = payload
+      assert %{"name" => _, "metrics" => metrics} = payload
 
       metrics = Map.new(metrics, fn map -> {map["name"], map} end)
 
-      assert %{"queue" => "default", "type" => "count", "value" => 0} = metrics["executing"]
-      assert %{"queue" => "default", "type" => "count", "value" => -3} = metrics["available"]
-      assert %{"queue" => "default", "type" => "count", "value" => 3} = metrics["completed"]
+      assert %{"queue" => "default", "type" => "delta", "value" => 0} = metrics["executing"]
+      assert %{"queue" => "default", "type" => "delta", "value" => -3} = metrics["available"]
+      assert %{"queue" => "default", "type" => "delta", "value" => 3} = metrics["completed"]
 
       assert %{
+               "node" => "worker.1",
                "queue" => "default",
                "worker" => "Worker.A",
                "type" => "sketch",
@@ -111,6 +112,7 @@ defmodule Oban.Met.ReporterTest do
              } = metrics["exec_time"]
 
       assert %{
+               "node" => "worker.1",
                "queue" => "default",
                "worker" => "Worker.A",
                "type" => "sketch",
