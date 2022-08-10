@@ -14,7 +14,9 @@ defmodule Oban.Met.Recorder do
   @type name_or_table :: GenServer.name() | :ets.t()
   @type series :: atom() | String.t()
   @type value :: integer() | Sketch.t()
-  @type labels :: %{optional(String.t()) => term()}
+  @type label :: String.t() | nil
+  @type labels :: %{optional(String.t()) => label()}
+  @type ts :: integer()
 
   defstruct [:conf, :name, :table, :timer]
 
@@ -39,17 +41,17 @@ defmodule Oban.Met.Recorder do
     :ets.lookup(table, to_string(series))
   end
 
-  @spec latest(name_or_table(), series(), Keyword.t()) :: %{optional(String.t()) => value()}
+  @spec latest(GenServer.name(), series(), Keyword.t()) :: %{optional(String.t()) => value()}
   def latest(name, series, opts \\ []) do
     {:ok, table} = Registry.meta(Oban.Registry, name)
 
     table
-    |> select(series, opts)
+    |> select(series, opts[:lookback])
+    |> filter_metrics(opts[:filters])
     |> group_metrics(opts[:group])
     |> Map.new(fn {group, metrics} ->
       value =
         metrics
-        |> filter_metrics(opts[:filters])
         |> sort_metrics()
         |> reduce_metrics()
 
@@ -57,14 +59,24 @@ defmodule Oban.Met.Recorder do
     end)
   end
 
-  # -> timeslice/3
-  #
-  # 2. Values over time
-  #   a. with an optional quantile for sketch data types
-  #   b. grouped by a label
-  #   c. filtered by a label
-  #   d. over configured periods (1s, 5s, 1m, etc)
-  #   e. using a configured lookback (30m, 1h, 5h)
+  @spec timeslice(GenServer.name(), series(), Keyword.t()) :: [{ts(), value(), label()}]
+  def timeslice(name, series, opts \\ []) do
+    {:ok, table} = Registry.meta(Oban.Registry, name)
+
+    slice = Keyword.get(opts, :by, 1)
+    label = to_string(Keyword.get(opts, :label, :any))
+    ntile = Keyword.get(opts, :quantile, 1.0)
+    now = System.system_time(:second)
+
+    table
+    |> select(series, opts[:lookback])
+    |> filter_metrics(opts[:filters])
+    |> rewrite_deltas()
+    |> Enum.map(fn {ts, value, labels} -> {ts, to_sketch(value), labels[label]} end)
+    |> Enum.sort_by(&elem(&1, 2))
+    |> Enum.chunk_by(fn {ts, _, label} -> {label, div(now - ts, slice)} end)
+    |> Enum.map(&merge_metrics(&1, ntile))
+  end
 
   @spec store(name_or_table(), series(), value(), labels(), Keyword.t()) :: :ok | :error
   def store(name_or_table, series, value, labels, opts \\ [])
@@ -103,15 +115,9 @@ defmodule Oban.Met.Recorder do
   end
 
   @impl GenServer
-  def handle_info({:notification, :gossip, %{"metrics" => _} = payload}, %State{} = state) do
-    %{"node" => node, "metrics" => metrics} = payload
-
+  def handle_info({:notification, :gossip, %{"metrics" => metrics}}, %State{} = state) do
     for %{"name" => name, "type" => type, "value" => value} = labels <- metrics do
-      labels =
-        labels
-        |> Map.delete("value")
-        |> Map.put("node", node)
-        |> Map.update!("type", &if(&1 == "count", do: "delta", else: &1))
+      labels = Map.drop(labels, ["name", "value"])
 
       store(state.table, name, cast_value(value, type), labels)
     end
@@ -159,9 +165,11 @@ defmodule Oban.Met.Recorder do
 
   # Fetching & Filtering
 
-  defp select(table, series, opts) do
+  defp select(table, series, nil), do: select(table, series, 60)
+
+  defp select(table, series, lookback) do
     series = to_string(series)
-    since = System.system_time(:second) - Keyword.get(opts, :lookback, 60)
+    since = System.system_time(:second) - lookback
 
     match = {series, :_, :"$1", :"$2", :"$3"}
     guard = [{:>=, :"$1", since}]
@@ -199,5 +207,30 @@ defmodule Oban.Met.Recorder do
         "sketch" -> {:cont, Sketch.merge(value, acc)}
       end
     end)
+  end
+
+  defp rewrite_deltas([{_, _, %{"type" => "sketch"}} | _] = metrics), do: metrics
+
+  defp rewrite_deltas(metrics) do
+    metrics
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.reduce({0, []}, fn {ts, value, labels}, {sum, acc} ->
+      case labels["type"] do
+        "count" -> {value, [{ts, value, labels} | acc]}
+        "delta" -> {sum + value, [{ts, sum + value, labels} | acc]}
+      end
+    end)
+    |> elem(1)
+  end
+
+  defp to_sketch(int) when is_integer(int), do: Sketch.new(values: [int])
+  defp to_sketch(sketch), do: sketch
+
+  defp merge_metrics(metrics, ntile) do
+    import Sketch, only: [merge: 2]
+
+    metrics
+    |> Enum.reduce(fn {_, new, _}, {ts, acc, label} -> {ts, merge(new, acc), label} end)
+    |> update_in([Access.elem(1)], &Sketch.quantile(&1, ntile))
   end
 end

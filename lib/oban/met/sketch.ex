@@ -23,14 +23,21 @@ defmodule Oban.Met.Sketch do
       iex> sketch = Oban.Met.Sketch.new()
       ...> Oban.Met.Sketch.size(sketch)
       0
+
+      iex> sketch = Oban.Met.Sketch.new(values: [1, 2, 3])
+      ...> Oban.Met.Sketch.size(sketch)
+      3
   """
   @spec new(error: float()) :: t()
-  def new(opts \\ [error: 0.02]) do
-    error = Keyword.fetch!(opts, :error)
+  def new(opts \\ []) do
+    error = Keyword.get(opts, :error, 0.02)
+    values = Keyword.get(opts, :values, [])
     gamma = (1 + error) / (1 - error)
     inv_log_gamma = 1.0 / :math.log(gamma)
 
-    %Sketch{gamma: gamma, inv_log_gamma: inv_log_gamma}
+    sketch = %Sketch{gamma: gamma, inv_log_gamma: inv_log_gamma}
+
+    Enum.reduce(values, sketch, &insert(&2, &1))
   end
 
   @doc """

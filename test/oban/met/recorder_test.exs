@@ -16,7 +16,7 @@ defmodule Oban.Met.RecorderTest do
     setup :start_supervised_recorder
 
     test "fetching metrics stored with pubsub notifications", %{pid: pid} do
-      metrics = [%{name: :available, queue: :default, type: :count, value: 1}]
+      metrics = [%{name: :available, queue: :default, type: :delta, value: 1}]
 
       payload =
         %{node: @node, metrics: metrics}
@@ -29,7 +29,7 @@ defmodule Oban.Met.RecorderTest do
 
       assert [{"available", _, _, 1, labels}] = Recorder.lookup(@name, :available)
 
-      assert %{"node" => @node, "queue" => "default", "type" => "delta"} = labels
+      assert %{"queue" => "default", "type" => "delta"} == labels
     end
   end
 
@@ -88,6 +88,40 @@ defmodule Oban.Met.RecorderTest do
     end
   end
 
+  describe "timeslice/3" do
+    setup :start_supervised_recorder
+
+    test "slicing counts by small periods" do
+      store(:executing, +1, %{"queue" => "alpha", "type" => "delta"}, timestamp: ts(-1))
+      store(:executing, -1, %{"queue" => "alpha", "type" => "delta"}, timestamp: ts(-2))
+      store(:executing, +4, %{"queue" => "alpha", "type" => "count"}, timestamp: ts(-3))
+      store(:executing, -1, %{"queue" => "alpha", "type" => "delta"}, timestamp: ts(-4))
+      store(:executing, -1, %{"queue" => "alpha", "type" => "delta"}, timestamp: ts(-5))
+      store(:executing, +5, %{"queue" => "alpha", "type" => "count"}, timestamp: ts(-6))
+
+      assert [{ts, value, label} | _] = timeslice(:executing)
+
+      assert is_integer(ts)
+      assert is_float(value)
+      refute label
+
+      assert [4, 3, 4, 3, 4, 5] = timeslice_values(:executing)
+      assert [4, 4, 4, 5] = timeslice_values(:executing, by: 2)
+      assert [4, 4, 5] = timeslice_values(:executing, by: 3)
+      assert [4, 5] = timeslice_values(:executing, by: 5)
+    end
+
+    test "slicing counts by groups" do
+      for value <- [1, 2], queue <- ~w(alpha gamma delta), ts <- [-1, -2] do
+        labels = %{"queue" => queue, "type" => "count"}
+
+        store(:exec_time, value, labels, timestamp: ts(ts))
+      end
+
+      assert [{_, _, "alpha"}, {_, _, "alpha"} | _] = timeslice(:exec_time, label: :queue)
+    end
+  end
+
   defp start_supervised_recorder(_context) do
     name = make_ref()
     start_supervised!({Oban, Keyword.put(@opts, :name, name)})
@@ -104,6 +138,14 @@ defmodule Oban.Met.RecorderTest do
 
   defp latest(series, opts \\ []) do
     Recorder.latest(@name, series, opts)
+  end
+
+  defp timeslice(series, opts \\ []) do
+    Recorder.timeslice(@name, series, opts)
+  end
+
+  defp timeslice_values(series, opts \\ []) do
+    for {_, value, _} <- timeslice(series, opts), do: round(value)
   end
 
   defp sketch(values) do
