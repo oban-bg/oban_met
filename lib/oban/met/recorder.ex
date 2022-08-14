@@ -2,7 +2,7 @@ defmodule Oban.Met.Recorder do
   @moduledoc """
   {series, min_ts, max_ts, value, labels}
 
-  {:available, 1659097422, 1659097422, 1, %{type: "count", queue: "default"}}
+  {:available, 1659097422, 1659097422, 1, %{type: "gauge", queue: "default"}}
   """
 
   use GenServer
@@ -18,7 +18,7 @@ defmodule Oban.Met.Recorder do
   @type labels :: %{optional(String.t()) => label()}
   @type ts :: integer()
 
-  defstruct [:conf, :name, :table, :timer]
+  defstruct [:checkpoint, :checkpoint_timer, :compact_timer, :conf, :name, :table]
 
   @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
   def child_spec(opts) do
@@ -99,17 +99,16 @@ defmodule Oban.Met.Recorder do
 
   @impl GenServer
   def init(opts) do
-    table = :ets.new(:metrics, [:bag, :public, :compressed, write_concurrency: true])
+    table = :ets.new(:metrics, [:bag, :public, :compressed])
 
     state =
       State
       |> struct!(Keyword.put(opts, :table, table))
       |> subscribe_gossip()
+      |> schedule_checkpoint()
       |> schedule_compact()
 
     Registry.put_meta(Oban.Registry, state.name, table)
-
-    # TODO: Start tracking keyframes eventually. This requires a database, or mocking.
 
     {:ok, state}
   end
@@ -117,9 +116,13 @@ defmodule Oban.Met.Recorder do
   @impl GenServer
   def handle_info({:notification, :gossip, %{"metrics" => metrics}}, %State{} = state) do
     for %{"name" => name, "type" => type, "value" => value} = labels <- metrics do
+      series = to_string(name)
       labels = Map.drop(labels, ["name", "value"])
 
-      store(state.table, name, cast_value(value, type), labels)
+      # TODO: Normalize labels
+      # TODO: Store the type separate from labels
+
+      store(state.table, series, cast_value(value, type), labels)
     end
 
     {:noreply, state}
@@ -130,6 +133,15 @@ defmodule Oban.Met.Recorder do
   end
 
   @impl GenServer
+  def handle_info(:checkpoint, %State{checkpoint: {mod, opts}, table: table} = state) do
+    {metrics, opts} = mod.call(opts)
+
+    # TODO: Kick off a task for this, keep it out of band
+    for {series, value, labels} <- metrics, do: store(table, series, value, labels)
+
+    {:noreply, schedule_checkpoint(%State{state | checkpoint: {mod, opts}})}
+  end
+
   def handle_info(:compact, %State{} = state) do
     # TODO: Kick off a task for this
 
@@ -160,7 +172,17 @@ defmodule Oban.Met.Recorder do
 
     timer = Process.send_after(self(), :compact, interval)
 
-    %State{state | timer: timer}
+    %State{state | compact_timer: timer}
+  end
+
+  defp schedule_checkpoint(%State{checkpoint: nil} = state), do: state
+
+  defp schedule_checkpoint(%State{checkpoint: {mod, opts}} = state) do
+    {interval, opts} = mod.interval(opts)
+
+    timer = Process.send_after(self(), :checkpoint, interval)
+
+    %State{state | checkpoint: {mod, opts}, checkpoint_timer: timer}
   end
 
   # Fetching & Filtering
@@ -202,7 +224,7 @@ defmodule Oban.Met.Recorder do
   defp reduce_metrics([{_max_ts, value, _labels} | tail]) do
     Enum.reduce_while(tail, value, fn {_max, value, labels}, acc ->
       case labels["type"] do
-        "count" -> {:halt, acc + value}
+        "gauge" -> {:halt, acc + value}
         "delta" -> {:cont, acc + value}
         "sketch" -> {:cont, Sketch.merge(value, acc)}
       end
@@ -216,7 +238,7 @@ defmodule Oban.Met.Recorder do
     |> Enum.sort_by(&elem(&1, 0))
     |> Enum.reduce({0, []}, fn {ts, value, labels}, {sum, acc} ->
       case labels["type"] do
-        "count" -> {value, [{ts, value, labels} | acc]}
+        "gauge" -> {value, [{ts, value, labels} | acc]}
         "delta" -> {sum + value, [{ts, sum + value, labels} | acc]}
       end
     end)
