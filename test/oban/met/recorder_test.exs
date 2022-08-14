@@ -25,6 +25,8 @@ defmodule Oban.Met.RecorderTest do
         {:available, 9, %{queue: "delta"}}
       ]
 
+      send(conf[:pid], :checkpoint)
+
       {metrics, conf}
     end
 
@@ -147,10 +149,10 @@ defmodule Oban.Met.RecorderTest do
 
     test "storing checkpoint output as guages", %{conf: conf} do
       start_supervised!(
-        {Recorder, conf: conf, name: @name, checkpoint: {Checkpoint, interval: 1}}
+        {Recorder, conf: conf, name: @name, checkpoint: {Checkpoint, interval: 1, pid: self()}}
       )
 
-      Process.sleep(5)
+      assert_receive :checkpoint
 
       assert metrics = Recorder.lookup(@name, :available)
 

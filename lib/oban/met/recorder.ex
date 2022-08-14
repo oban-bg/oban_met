@@ -132,24 +132,30 @@ defmodule Oban.Met.Recorder do
     {:noreply, state}
   end
 
-  @impl GenServer
   def handle_info(:checkpoint, %State{checkpoint: {mod, opts}, table: table} = state) do
-    {metrics, opts} = mod.call(opts)
+    parent = self()
 
-    # TODO: Kick off a task for this, keep it out of band
-    for {series, value, labels} <- metrics, do: store(table, series, value, labels)
+    Task.async(fn ->
+      {metrics, opts} = mod.call(opts)
 
-    {:noreply, schedule_checkpoint(%State{state | checkpoint: {mod, opts}})}
+      for {series, value, labels} <- metrics, do: store(table, series, value, labels)
+
+      send(parent, {:schedule_checkpoint, opts})
+    end)
+
+    {:noreply, state}
   end
 
+  # TODO: Kick off a task for this
   def handle_info(:compact, %State{} = state) do
-    # TODO: Kick off a task for this
-
     {:noreply, schedule_compact(state)}
   end
 
-  defp cast_value(%{"data" => _} = value, "sketch"), do: Sketch.from_map(value)
-  defp cast_value(value, _type), do: value
+  def handle_info({:schedule_checkpoint, opts}, %State{checkpoint: {mod, _}} = state) do
+    state = %State{state | checkpoint: {mod, opts}}
+
+    {:noreply, schedule_checkpoint(state)}
+  end
 
   # Scheduling
 
@@ -184,6 +190,9 @@ defmodule Oban.Met.Recorder do
 
     %State{state | checkpoint: {mod, opts}, checkpoint_timer: timer}
   end
+
+  defp cast_value(%{"data" => _} = value, "sketch"), do: Sketch.from_map(value)
+  defp cast_value(value, _type), do: value
 
   # Fetching & Filtering
 
