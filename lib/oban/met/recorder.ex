@@ -1,8 +1,6 @@
 defmodule Oban.Met.Recorder do
   @moduledoc """
-  {series, min_ts, max_ts, value, labels}
-
-  {:available, 1659097422, 1659097422, 1, %{type: "gauge", queue: "default"}}
+  Aggregate metrics via pubsub for querying and compaction.
   """
 
   use GenServer
@@ -78,20 +76,21 @@ defmodule Oban.Met.Recorder do
     |> Enum.map(&merge_metrics(&1, ntile))
   end
 
-  @spec store(name_or_table(), series(), value(), labels(), Keyword.t()) :: :ok | :error
-  def store(name_or_table, series, value, labels, opts \\ [])
+  @doc false
+  def store(name_or_table, series, type, value, labels, opts \\ [])
 
-  def store(table, series, value, labels, opts) when is_reference(table) do
+  def store(table, series, type, value, labels, opts)
+      when is_reference(table) and type in [:gauge, :delta, :sketch] do
     ts = Keyword.get(opts, :timestamp, System.system_time(:second))
 
-    :ets.insert(table, {to_string(series), ts, ts, value, labels})
+    :ets.insert(table, {to_string(series), ts, ts, type, value, labels})
 
     :ok
   end
 
-  def store(name, series, value, labels, opts) do
+  def store(name, series, type, value, labels, opts) do
     with {:ok, table} <- Registry.meta(Oban.Registry, name) do
-      store(table, series, value, labels, opts)
+      store(table, series, type, value, labels, opts)
     end
   end
 
@@ -115,14 +114,11 @@ defmodule Oban.Met.Recorder do
 
   @impl GenServer
   def handle_info({:notification, :gossip, %{"metrics" => metrics}}, %State{} = state) do
-    for %{"name" => name, "type" => type, "value" => value} = labels <- metrics do
-      series = to_string(name)
-      labels = Map.drop(labels, ["name", "value"])
+    for %{"name" => series, "type" => type, "value" => value} = labels <- metrics do
+      type = String.to_existing_atom(type)
+      labels = Map.drop(labels, ["name", "type", "value"])
 
-      # TODO: Normalize labels
-      # TODO: Store the type separate from labels
-
-      store(state.table, series, cast_value(value, type), labels)
+      store(state.table, series, type, cast_value(value, type), labels)
     end
 
     {:noreply, state}
@@ -138,7 +134,7 @@ defmodule Oban.Met.Recorder do
     Task.async(fn ->
       {metrics, opts} = mod.call(opts)
 
-      for {series, value, labels} <- metrics, do: store(table, series, value, labels)
+      for {series, value, labels} <- metrics, do: store(table, series, :gauge, value, labels)
 
       send(parent, {:schedule_checkpoint, opts})
     end)
@@ -202,20 +198,20 @@ defmodule Oban.Met.Recorder do
     series = to_string(series)
     since = System.system_time(:second) - lookback
 
-    match = {series, :_, :"$1", :"$2", :"$3"}
+    match = {series, :_, :"$1", :"$2", :"$3", :"$4"}
     guard = [{:>=, :"$1", since}]
 
-    :ets.select(table, [{match, guard, [{{:"$1", :"$2", :"$3"}}]}])
+    :ets.select(table, [{match, guard, [{{:"$1", :"$2", :"$3", :"$4"}}]}])
   end
 
   defp group_metrics(metrics, nil), do: %{"all" => metrics}
 
   defp group_metrics(metrics, group) do
-    Enum.group_by(metrics, &get_in(&1, [Access.elem(2), to_string(group)]))
+    Enum.group_by(metrics, &get_in(&1, [Access.elem(3), to_string(group)]))
   end
 
   defp sort_metrics(metrics) do
-    Enum.sort_by(metrics, fn {max_ts, _value, _labels} -> -max_ts end)
+    Enum.sort_by(metrics, fn {max_ts, _type, _value, _labels} -> -max_ts end)
   end
 
   defp filter_metrics(metrics, nil), do: metrics
@@ -223,32 +219,32 @@ defmodule Oban.Met.Recorder do
   defp filter_metrics(metrics, filters) do
     filters = Map.new(filters, fn {key, val} -> {to_string(key), List.wrap(val)} end)
 
-    Enum.filter(metrics, fn {_max_ts, _value, labels} ->
+    Enum.filter(metrics, fn {_max_ts, _type, _value, labels} ->
       Enum.all?(filters, fn {name, list} -> labels[name] in list end)
     end)
   end
 
   defp reduce_metrics([]), do: nil
 
-  defp reduce_metrics([{_max_ts, value, _labels} | tail]) do
-    Enum.reduce_while(tail, value, fn {_max, value, labels}, acc ->
-      case labels["type"] do
-        "gauge" -> {:halt, acc + value}
-        "delta" -> {:cont, acc + value}
-        "sketch" -> {:cont, Sketch.merge(value, acc)}
+  defp reduce_metrics([{_max_ts, _type, value, _labels} | tail]) do
+    Enum.reduce_while(tail, value, fn {_max_ts, type, value, _labels}, acc ->
+      case type do
+        :gauge -> {:halt, acc + value}
+        :delta -> {:cont, acc + value}
+        :sketch -> {:cont, Sketch.merge(value, acc)}
       end
     end)
   end
 
-  defp rewrite_deltas([{_, _, %{"type" => "sketch"}} | _] = metrics), do: metrics
+  defp rewrite_deltas([{_, :sketch, _, _} | _] = metrics), do: metrics
 
   defp rewrite_deltas(metrics) do
     metrics
     |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.reduce({0, []}, fn {ts, value, labels}, {sum, acc} ->
-      case labels["type"] do
-        "gauge" -> {value, [{ts, value, labels} | acc]}
-        "delta" -> {sum + value, [{ts, sum + value, labels} | acc]}
+    |> Enum.reduce({0, []}, fn {ts, type, value, labels}, {sum, acc} ->
+      case type do
+        :gauge -> {value, [{ts, value, labels} | acc]}
+        :delta -> {sum + value, [{ts, sum + value, labels} | acc]}
       end
     end)
     |> elem(1)
