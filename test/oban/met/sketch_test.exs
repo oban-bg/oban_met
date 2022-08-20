@@ -16,8 +16,8 @@ defmodule Oban.Met.SketchTest do
   end
 
   property "encoded and decoded sketches retain the same values" do
-    check all error <- float(min: 0.01, max: 0.9), values <- list_of(positive_integer(), min_length: 1) do
-      sketch = Enum.reduce(values, Sketch.new(error: error), &Sketch.insert(&2, &1))
+    check all values <- list_of(positive_integer(), min_length: 1) do
+      sketch = Sketch.new(values)
 
       size = Sketch.size(sketch)
       min = Sketch.quantile(sketch, 0.0)

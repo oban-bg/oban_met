@@ -1,19 +1,23 @@
 defmodule Oban.Met.Sketch do
   @moduledoc """
   Derived from [DogSketch](https://github.com/moosecodebv/dog_sketch), based on DDSketch.
-  """
 
-  @type t :: %__MODULE__{
-          data: %{optional(pos_integer()) => pos_integer()},
-          size: non_neg_integer(),
-          gamma: non_neg_integer(),
-          inv_log_gamma: non_neg_integer()
-        }
+  This variant has a hard-coded error rate of 0.02 for the sake of simplicity.
+  """
 
   alias __MODULE__, as: Sketch
 
+  @type t :: %__MODULE__{
+          data: %{optional(pos_integer()) => pos_integer()},
+          size: non_neg_integer()
+        }
+
   @derive Jason.Encoder
-  defstruct data: %{}, gamma: 0, inv_log_gamma: 0, size: 0
+  defstruct data: %{}, size: 0
+
+  @error 0.02
+  @gamma (1 + @error) / (1 - @error)
+  @inv_log_gamma 1.0 / :math.log(@gamma)
 
   @doc """
   Create a new sketch instance with an optional error rate.
@@ -24,20 +28,13 @@ defmodule Oban.Met.Sketch do
       ...> Oban.Met.Sketch.size(sketch)
       0
 
-      iex> sketch = Oban.Met.Sketch.new(values: [1, 2, 3])
+      iex> sketch = Oban.Met.Sketch.new([1, 2, 3])
       ...> Oban.Met.Sketch.size(sketch)
       3
   """
-  @spec new(error: float()) :: t()
-  def new(opts \\ []) do
-    error = Keyword.get(opts, :error, 0.02)
-    values = Keyword.get(opts, :values, [])
-    gamma = (1 + error) / (1 - error)
-    inv_log_gamma = 1.0 / :math.log(gamma)
-
-    sketch = %Sketch{gamma: gamma, inv_log_gamma: inv_log_gamma}
-
-    Enum.reduce(values, sketch, &insert(&2, &1))
+  @spec new([pos_integer()]) :: t()
+  def new(values \\ []) do
+    Enum.reduce(values, %Sketch{}, &insert(&2, &1))
   end
 
   @doc """
@@ -75,7 +72,7 @@ defmodule Oban.Met.Sketch do
   """
   @spec insert(t(), pos_integer()) :: t()
   def insert(%Sketch{} = sketch, value) when is_integer(value) and value > 0 do
-    bin = ceil(:math.log(value) * sketch.inv_log_gamma)
+    bin = ceil(:math.log(value) * @inv_log_gamma)
     data = Map.update(sketch.data, bin, 1, &(&1 + 1))
 
     %Sketch{sketch | data: data, size: sketch.size + 1}
@@ -118,7 +115,7 @@ defmodule Oban.Met.Sketch do
         end
       end)
 
-    2 * :math.pow(sketch.gamma, index) / (sketch.gamma + 1)
+    2 * :math.pow(@gamma, index) / (@gamma + 1)
   end
 
   @doc """
@@ -135,8 +132,8 @@ defmodule Oban.Met.Sketch do
       3
   """
   @spec to_list(t()) :: [float()]
-  def to_list(%Sketch{data: data, gamma: gamma}) do
-    for {key, val} <- data, do: {2 * :math.pow(gamma, key) / (gamma + 1), val}
+  def to_list(%Sketch{data: data}) do
+    for {key, val} <- data, do: {2 * :math.pow(@gamma, key) / (@gamma + 1), val}
   end
 
   @doc false
@@ -159,9 +156,9 @@ defmodule Oban.Met.Sketch do
       2
   """
   @spec from_map(%{optional(String.t()) => term()}) :: t()
-  def from_map(%{"data" => data, "gamma" => gamma, "inv_log_gamma" => inv, "size" => size}) do
+  def from_map(%{"data" => data, "size" => size}) do
     data = Map.new(data, fn {key, val} -> {String.to_integer(key), val} end)
 
-    %Sketch{data: data, gamma: gamma, inv_log_gamma: inv, size: size}
+    %Sketch{data: data, size: size}
   end
 end
