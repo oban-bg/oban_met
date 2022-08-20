@@ -6,8 +6,8 @@ defmodule Oban.Met.Recorder do
   use GenServer
 
   alias __MODULE__, as: State
-  alias Oban.Notifier
   alias Oban.Met.Sketch
+  alias Oban.Notifier
 
   @type name_or_table :: GenServer.name() | :ets.t()
   @type series :: atom() | String.t()
@@ -323,7 +323,7 @@ defmodule Oban.Met.Recorder do
     |> elem(1)
   end
 
-  defp to_sketch(int) when is_integer(int), do: Sketch.new(values: [int])
+  defp to_sketch(int) when is_integer(int), do: Sketch.new([int])
   defp to_sketch(sketch), do: sketch
 
   defp merge_metrics(metrics, ntile) do

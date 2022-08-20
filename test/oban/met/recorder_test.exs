@@ -14,9 +14,9 @@ defmodule Oban.Met.RecorderTest do
   ]
 
   defmodule Checkpoint do
-    alias Oban.Met.Checkpoint
+    @behaviour Oban.Met.Checkpoint
 
-    @behaviour Checkpoint
+    alias Oban.Met.Checkpoint
 
     @impl Checkpoint
     def call(conf) do
@@ -199,7 +199,7 @@ defmodule Oban.Met.RecorderTest do
     end
 
     test "sketches within periods of time are compacted by interval" do
-      sketch = Sketch.new(values: [1, 2, 3])
+      sketch = Sketch.new([1, 2, 3])
 
       for offset <- [1, 4, 5, 6, 7] do
         store(:a, :sketch, sketch, %{queue: :alpha}, timestamp: ts(-offset))

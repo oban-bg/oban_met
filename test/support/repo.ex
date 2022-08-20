@@ -5,4 +5,3 @@ defmodule Oban.Met.Repo do
 
   def config, do: []
 end
-

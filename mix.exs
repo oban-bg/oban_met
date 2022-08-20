@@ -27,6 +27,7 @@ defmodule Oban.Met.MixProject do
       {:oban, "~> 2.13"},
       {:telemetry, "~> 1.1"},
       {:benchee, "~> 1.0", only: [:test, :dev], runtime: false},
+      {:credo, "~> 1.6", only: [:test, :dev], runtime: false},
       {:stream_data, "~> 0.5", only: [:test, :dev]}
     ]
   end
