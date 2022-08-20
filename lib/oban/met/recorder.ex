@@ -16,7 +16,26 @@ defmodule Oban.Met.Recorder do
   @type labels :: %{optional(String.t()) => label()}
   @type ts :: integer()
 
-  defstruct [:checkpoint, :checkpoint_timer, :compact_timer, :conf, :name, :table]
+  @periods [
+    # 1s for 2m
+    {1, 120},
+    # 5s for 10m
+    {5, 600},
+    # 60s for 120m
+    {60, 7_200},
+    # 5m for 1d
+    {300, 86_400}
+  ]
+
+  defstruct [
+    :checkpoint,
+    :checkpoint_timer,
+    :compact_timer,
+    :conf,
+    :name,
+    :table,
+    compact_periods: @periods
+  ]
 
   @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
   def child_spec(opts) do
@@ -94,6 +113,59 @@ defmodule Oban.Met.Recorder do
     end
   end
 
+  @doc false
+  def compact(table, periods) when is_reference(table) and is_list(periods) do
+    delete_outdated(table, periods)
+
+    Enum.reduce(periods, System.system_time(:second), fn {step, duration}, ts ->
+      since = ts - duration
+      match = {:_, :"$1", :"$2", :_, :_, :_}
+      guard = [{:andalso, {:>=, :"$1", since}, {:"=<", :"$2", ts}}]
+
+      objects = :ets.select(table, [{match, guard, [:"$_"]}])
+      _delete = :ets.select_delete(table, [{match, guard, [true]}])
+
+      objects
+      |> Enum.sort_by(fn {series, _, max_ts, _, _, labels} -> {series, labels, max_ts} end)
+      |> Enum.chunk_by(fn {_, _, max_ts, _, _, _} -> div(ts - max_ts, step) end)
+      |> Enum.map(&compact/1)
+      |> then(&:ets.insert(table, &1))
+
+      since
+    end)
+  end
+
+  def compact(name, periods) do
+    with {:ok, table} <- Registry.meta(Oban.Registry, name) do
+      compact(table, periods)
+    end
+  end
+
+  defp compact([{series, _, _, type, _, labels} | _] = metrics) do
+    min_ts = metrics |> Enum.map(&elem(&1, 1)) |> Enum.min()
+    max_ts = metrics |> Enum.map(&elem(&1, 2)) |> Enum.max()
+
+    value =
+      Enum.reduce(metrics, Sketch.new(), fn {_, _, _, _, value, _}, acc ->
+        value
+        |> to_sketch()
+        |> Sketch.merge(acc)
+      end)
+
+    {series, min_ts, max_ts, type, value, labels}
+  end
+
+  defp delete_outdated(table, periods) do
+    systime = System.system_time(:second)
+    maximum = Enum.reduce(periods, 0, fn {_, duration}, acc -> duration + acc end)
+
+    since = systime - maximum
+    match = {:_, :_, :"$2", :_, :_, :_}
+    guard = [{:<, :"$2", since}]
+
+    :ets.select_delete(table, [{match, guard, [true]}])
+  end
+
   # Callbacks
 
   @impl GenServer
@@ -142,8 +214,9 @@ defmodule Oban.Met.Recorder do
     {:noreply, state}
   end
 
-  # TODO: Kick off a task for this
-  def handle_info(:compact, %State{} = state) do
+  def handle_info(:compact, %State{compact_periods: periods, table: table} = state) do
+    Task.async(__MODULE__, :compact, [table, periods])
+
     {:noreply, schedule_compact(state)}
   end
 
@@ -170,7 +243,7 @@ defmodule Oban.Met.Recorder do
       |> Map.put(:second, 0)
       |> Time.diff(time)
       |> Integer.mod(86_400)
-      |> :timer.seconds()
+      |> System.convert_time_unit(:second, :millisecond)
 
     timer = Process.send_after(self(), :compact, interval)
 

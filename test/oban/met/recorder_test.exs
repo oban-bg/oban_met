@@ -1,5 +1,6 @@
 defmodule Oban.Met.RecorderTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Oban.Met.{Recorder, Sketch}
 
@@ -47,9 +48,11 @@ defmodule Oban.Met.RecorderTest do
 
       send(pid, {:notification, :gossip, payload})
 
+      ts = System.system_time(:second)
+
       Process.sleep(10)
 
-      assert [{"available", _, _, :delta, 1, labels}] = Recorder.lookup(@name, :available)
+      assert [{"available", ^ts, ^ts, :delta, 1, labels}] = Recorder.lookup(@name, :available)
 
       assert %{"queue" => "default"} = labels
     end
@@ -160,6 +163,105 @@ defmodule Oban.Met.RecorderTest do
     end
   end
 
+  describe "compact/2" do
+    setup [:start_supervised_oban, :start_supervised_recorder]
+
+    test "gauges within periods of time are compacted by interval" do
+      for series <- [:a, :b], queue <- [:alpha, :gamma, :delta], off <- [1, 5, 6, 9] do
+        store(series, :gauge, 1, %{queue: queue}, timestamp: ts(-off))
+      end
+
+      originals_a = lookup(:a)
+      originals_b = lookup(:b)
+
+      compact([{5, 60}])
+
+      compacted_a = lookup(:a)
+      compacted_b = lookup(:b)
+
+      for {originals, compacted} <- [{originals_a, compacted_a}, {originals_b, compacted_b}] do
+        assert length(originals) > length(compacted)
+
+        assert length(originals) ==
+                 compacted
+                 |> Enum.map(fn {_, _, _, _, sketch, _} -> Sketch.size(sketch) end)
+                 |> Enum.sum()
+
+        get_queues = fn metrics ->
+          metrics
+          |> Enum.map(&get_in(&1, [Access.elem(5), :queue]))
+          |> Enum.uniq()
+          |> Enum.sort()
+        end
+
+        assert get_queues.(originals) == get_queues.(compacted)
+      end
+    end
+
+    test "sketches within periods of time are compacted by interval" do
+      sketch = Sketch.new(values: [1, 2, 3])
+
+      for offset <- [1, 4, 5, 6, 7] do
+        store(:a, :sketch, sketch, %{queue: :alpha}, timestamp: ts(-offset))
+      end
+
+      compact([{5, 60}])
+
+      assert [6, 9] =
+               :a
+               |> lookup()
+               |> Enum.map(fn {_, _, _, _, sketch, _} -> Sketch.size(sketch) end)
+    end
+
+    test "compacting metrics multiple times is idempotent" do
+      for queue <- [:alpha, :gamma], offset <- 1..61 do
+        store(:a, :gauge, 1, %{queue: queue}, timestamp: ts(-offset))
+      end
+
+      compact([{5, 60}])
+      compacted_1 = lookup(:a)
+
+      compact([{5, 60}])
+      compacted_2 = lookup(:a)
+
+      assert compacted_1 == compacted_2
+    end
+
+    test "deleting metrics beyond the final period" do
+      store(:a, :gauge, 1, %{queue: :alpha}, timestamp: ts(-119))
+      store(:a, :gauge, 1, %{queue: :gamma}, timestamp: ts(-120))
+      store(:a, :gauge, 1, %{queue: :delta}, timestamp: ts(-121))
+
+      compact([{1, 60}, {1, 60}])
+
+      assert [:gamma, :alpha] =
+               :a
+               |> lookup()
+               |> Enum.map(&get_in(&1, [Access.elem(5), :queue]))
+    end
+  end
+
+  describe "automatic compaction" do
+    setup :start_supervised_oban
+
+    test "automatically compacting on an interval", %{conf: conf} do
+      pid = start_supervised!({Recorder, conf: conf, name: @name, compact_periods: [{5, 60}]})
+
+      store(:a, :gauge, 4, %{queue: :alpha}, timestamp: ts(-3))
+      store(:a, :gauge, 3, %{queue: :alpha}, timestamp: ts(-4))
+      store(:a, :gauge, 2, %{queue: :alpha}, timestamp: ts(-6))
+      store(:a, :gauge, 1, %{queue: :alpha}, timestamp: ts(-7))
+
+      assert length(lookup(:a)) == 4
+
+      send(pid, :compact)
+
+      Process.sleep(5)
+
+      assert length(lookup(:a)) == 2
+    end
+  end
+
   defp start_supervised_oban(_context) do
     name = make_ref()
     start_supervised!({Oban, Keyword.put(@opts, :name, name)})
@@ -175,12 +277,20 @@ defmodule Oban.Met.RecorderTest do
     {:ok, pid: pid}
   end
 
+  defp compact(periods) do
+    Recorder.compact(@name, periods)
+  end
+
   defp store(series, type, value, labels, opts \\ []) do
     Recorder.store(@name, series, type, value, labels, opts)
   end
 
   defp latest(series, opts \\ []) do
     Recorder.latest(@name, series, opts)
+  end
+
+  defp lookup(series) do
+    Recorder.lookup(@name, series)
   end
 
   defp timeslice(series, opts \\ []) do
