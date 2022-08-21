@@ -55,7 +55,9 @@ defmodule Oban.Met.Recorder do
   def lookup(name, series) do
     {:ok, table} = Registry.meta(Oban.Registry, name)
 
-    :ets.lookup(table, to_string(series))
+    match = {{to_string(series), :_, :_}, :_, :_, :_}
+
+    :ets.select(table, [{match, [], [:"$_"]}])
   end
 
   @spec latest(GenServer.name(), series(), Keyword.t()) :: %{optional(String.t()) => value()}
@@ -100,11 +102,22 @@ defmodule Oban.Met.Recorder do
 
   def store(table, series, type, value, labels, opts)
       when is_reference(table) and type in [:gauge, :delta, :sketch] do
+    series = to_string(series)
     ts = Keyword.get(opts, :timestamp, System.system_time(:second))
 
-    :ets.insert(table, {to_string(series), ts, ts, type, value, labels})
+    case {type, get_latest(table, series, labels)} do
+      {_type, {{^series, ^labels, ^ts} = key, ^ts, ^type, old_value}} ->
+        :ets.insert(table, {key, ts, type, merge(old_value, value)})
 
-    :ok
+      {:delta, {{^series, ^labels, _max_ts}, _min_ts, :gauge, old_value}} ->
+        :ets.insert(table, {{series, labels, ts}, ts, type, merge(old_value, value)})
+
+      {:delta, nil} ->
+        raise "missing gauge"
+
+      {_type, _object} ->
+        :ets.insert(table, {{series, labels, ts}, ts, type, value})
+    end
   end
 
   def store(name, series, type, value, labels, opts) do
@@ -113,21 +126,33 @@ defmodule Oban.Met.Recorder do
     end
   end
 
+  defp get_latest(table, series, labels) do
+    match = {{series, labels, :_}, :_, :_, :_}
+
+    case :ets.select_reverse(table, [{match, [], [:"$_"]}], 1) do
+      {[object], _cont} -> object
+      _ -> nil
+    end
+  end
+
+  defp merge(%Sketch{} = old, %Sketch{} = new), do: Sketch.merge(old, new)
+  defp merge(%Sketch{} = old, new), do: Sketch.insert(old, new)
+  defp merge(old, new), do: old + new
+
   @doc false
   def compact(table, periods) when is_reference(table) and is_list(periods) do
     delete_outdated(table, periods)
 
     Enum.reduce(periods, System.system_time(:second), fn {step, duration}, ts ->
       since = ts - duration
-      match = {:_, :"$1", :"$2", :_, :_, :_}
-      guard = [{:andalso, {:>=, :"$1", since}, {:"=<", :"$2", ts}}]
+      match = {{:_, :_, :"$1"}, :"$2", :_, :_}
+      guard = [{:andalso, {:>=, :"$2", since}, {:"=<", :"$1", ts}}]
 
       objects = :ets.select(table, [{match, guard, [:"$_"]}])
       _delete = :ets.select_delete(table, [{match, guard, [true]}])
 
       objects
-      |> Enum.sort_by(fn {series, _, max_ts, _, _, labels} -> {series, labels, max_ts} end)
-      |> Enum.chunk_by(fn {_, _, max_ts, _, _, _} -> div(ts - max_ts, step) end)
+      |> Enum.chunk_by(fn {{_, _, max_ts}, _, _, _} -> div(ts - max_ts - 1, step) end)
       |> Enum.map(&compact/1)
       |> then(&:ets.insert(table, &1))
 
@@ -141,18 +166,17 @@ defmodule Oban.Met.Recorder do
     end
   end
 
-  defp compact([{series, _, _, type, _, labels} | _] = metrics) do
-    min_ts = metrics |> Enum.map(&elem(&1, 1)) |> Enum.min()
-    max_ts = metrics |> Enum.map(&elem(&1, 2)) |> Enum.max()
+  defp compact([{{series, labels, min_ts}, _, type, _} | _] = metrics) do
+    max_ts = metrics |> List.last() |> elem(1)
 
     value =
-      Enum.reduce(metrics, Sketch.new(), fn {_, _, _, _, value, _}, acc ->
+      Enum.reduce(metrics, Sketch.new(), fn {_key, _min, _type, value}, acc ->
         value
         |> to_sketch()
         |> Sketch.merge(acc)
       end)
 
-    {series, min_ts, max_ts, type, value, labels}
+    {{series, labels, max_ts}, min_ts, type, value}
   end
 
   defp delete_outdated(table, periods) do
@@ -160,8 +184,8 @@ defmodule Oban.Met.Recorder do
     maximum = Enum.reduce(periods, 0, fn {_, duration}, acc -> duration + acc end)
 
     since = systime - maximum
-    match = {:_, :_, :"$2", :_, :_, :_}
-    guard = [{:<, :"$2", since}]
+    match = {{:_, :_, :"$1"}, :_, :_, :_}
+    guard = [{:<, :"$1", since}]
 
     :ets.select_delete(table, [{match, guard, [true]}])
   end
@@ -170,7 +194,13 @@ defmodule Oban.Met.Recorder do
 
   @impl GenServer
   def init(opts) do
-    table = :ets.new(:metrics, [:bag, :public, :compressed])
+    table =
+      :ets.new(:metrics, [
+        :ordered_set,
+        :public,
+        read_concurrency: true,
+        write_concurrency: true
+      ])
 
     state =
       State
@@ -268,7 +298,6 @@ defmodule Oban.Met.Recorder do
   defp select(table, series, nil), do: select(table, series, 60)
 
   defp select(table, series, lookback) do
-    series = to_string(series)
     since = System.system_time(:second) - lookback
 
     match = {series, :_, :"$1", :"$2", :"$3", :"$4"}
@@ -327,8 +356,6 @@ defmodule Oban.Met.Recorder do
   defp to_sketch(sketch), do: sketch
 
   defp merge_metrics(metrics, ntile) do
-    import Sketch, only: [merge: 2]
-
     metrics
     |> Enum.reduce(fn {_, new, _}, {ts, acc, label} -> {ts, merge(new, acc), label} end)
     |> update_in([Access.elem(1)], &Sketch.quantile(&1, ntile))

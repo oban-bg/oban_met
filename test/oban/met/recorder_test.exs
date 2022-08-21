@@ -39,7 +39,7 @@ defmodule Oban.Met.RecorderTest do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
     test "fetching metrics stored with pubsub notifications", %{pid: pid} do
-      metrics = [%{name: :available, queue: :default, type: :delta, value: 1}]
+      metrics = [%{name: :exec, node: @node, queue: :default, type: :gauge, value: 1}]
 
       payload =
         %{node: @node, metrics: metrics}
@@ -52,9 +52,8 @@ defmodule Oban.Met.RecorderTest do
 
       Process.sleep(10)
 
-      assert [{"available", ^ts, ^ts, :delta, 1, labels}] = Recorder.lookup(@name, :available)
-
-      assert %{"queue" => "default"} = labels
+      assert [{{"exec", labels, ^ts}, ^ts, :gauge, 1}] = Recorder.lookup(@name, :exec)
+      assert %{"node" => @node, "queue" => "default"} = labels
     end
   end
 
@@ -91,13 +90,13 @@ defmodule Oban.Met.RecorderTest do
     end
 
     test "grouping the latest values by a label" do
-      store(:executing, :delta, 4, %{"node" => "web.1", "queue" => "alpha"})
-      store(:executing, :delta, 3, %{"node" => "web.1", "queue" => "gamma"})
-      store(:executing, :gauge, 4, %{"node" => "web.2", "queue" => "alpha"})
-      store(:executing, :gauge, 3, %{"node" => "web.2", "queue" => "gamma"})
+      store(:exec, :gauge, 4, %{"node" => "web.2", "queue" => "alpha"})
+      store(:exec, :gauge, 3, %{"node" => "web.2", "queue" => "gamma"})
+      store(:exec, :delta, 4, %{"node" => "web.1", "queue" => "alpha"})
+      store(:exec, :delta, 3, %{"node" => "web.1", "queue" => "gamma"})
 
-      assert %{"alpha" => 8, "gamma" => 6} = latest(:executing, group: :queue)
-      assert %{"web.1" => 7, "web.2" => 7} = latest(:executing, group: :node)
+      assert %{"alpha" => 8, "gamma" => 6} = latest(:exec, group: :queue)
+      assert %{"web.1" => 7, "web.2" => 7} = latest(:exec, group: :node)
     end
 
     test "filtering the latest values by a label" do
@@ -184,18 +183,33 @@ defmodule Oban.Met.RecorderTest do
 
         assert length(originals) ==
                  compacted
-                 |> Enum.map(fn {_, _, _, _, sketch, _} -> Sketch.size(sketch) end)
+                 |> Enum.map(fn {_, _, _, sketch} -> Sketch.size(sketch) end)
                  |> Enum.sum()
 
         get_queues = fn metrics ->
           metrics
-          |> Enum.map(&get_in(&1, [Access.elem(5), :queue]))
+          |> Enum.map(&get_in(&1, [Access.elem(0), Access.elem(1), :queue]))
           |> Enum.uniq()
           |> Enum.sort()
         end
 
         assert get_queues.(originals) == get_queues.(compacted)
       end
+    end
+
+    test "compacted intervals contain a range from min to max timestamps" do
+      for offset <- 1..30 do
+        store(:a, :gauge, 1, %{queue: :alpha}, timestamp: ts(-offset))
+      end
+
+      assert length(lookup(:a)) == 30
+
+      compact([{10, 30}])
+
+      assert [9, 9, 9] =
+        :a
+        |> lookup()
+        |> Enum.map(fn {{_key, _lab, max_ts}, min_ts, _, _} -> max_ts - min_ts end)
     end
 
     test "sketches within periods of time are compacted by interval" do
@@ -210,7 +224,7 @@ defmodule Oban.Met.RecorderTest do
       assert [6, 9] =
                :a
                |> lookup()
-               |> Enum.map(fn {_, _, _, _, sketch, _} -> Sketch.size(sketch) end)
+               |> Enum.map(fn {_, _, _, sketch} -> Sketch.size(sketch) end)
     end
 
     test "compacting metrics multiple times is idempotent" do
@@ -234,10 +248,10 @@ defmodule Oban.Met.RecorderTest do
 
       compact([{1, 60}, {1, 60}])
 
-      assert [:gamma, :alpha] =
+      assert [:alpha, :gamma] =
                :a
                |> lookup()
-               |> Enum.map(&get_in(&1, [Access.elem(5), :queue]))
+               |> Enum.map(&get_in(&1, [Access.elem(0), Access.elem(1), :queue]))
     end
   end
 
