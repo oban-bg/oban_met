@@ -61,30 +61,23 @@ defmodule Oban.Met.RecorderTest do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
     test "fetching the latest value for stored gauges" do
-      labels = %{"queue" => "default"}
-      store(:available, :delta, +1, labels, timestamp: ts())
-      store(:available, :delta, -2, labels, timestamp: ts(-10))
-      store(:available, :delta, +5, labels, timestamp: ts(-20))
-      store(:available, :gauge, 20, labels, timestamp: ts(-25))
-      store(:available, :gauge, 25, labels, timestamp: ts(-30))
+      store(:available, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts())
+      store(:available, :gauge, 2, %{"queue" => "gamma"}, timestamp: ts())
+      store(:available, :gauge, 3, %{"queue" => "alpha"}, timestamp: ts(-1))
+      store(:available, :gauge, 3, %{"queue" => "gamma"}, timestamp: ts(-1))
 
-      assert %{"all" => 24} = latest(:available)
-      assert %{"all" => -1} = latest(:available, lookback: 10)
-      assert %{"all" => +4} = latest(:available, lookback: 20)
-      assert %{"all" => 24} = latest(:available, lookback: 30)
+      assert %{"all" => 3} = latest(:available)
     end
 
     test "fetching the latest value for stored sketches" do
-      labels = %{"queue" => "default"}
-
-      store(:exec_time, :sketch, sketch([1, 2]), labels, timestamp: ts())
-      store(:exec_time, :sketch, sketch([2, 3]), labels, timestamp: ts(-10))
-      store(:exec_time, :sketch, sketch([1, 3]), labels, timestamp: ts(-20))
-      store(:exec_time, :sketch, sketch([1, 3]), labels, timestamp: ts(-90))
+      store(:exec_time, :sketch, sketch([1, 2]), %{"queue" => "alpha"}, timestamp: ts())
+      store(:exec_time, :sketch, sketch([2, 3]), %{"queue" => "gamma"}, timestamp: ts())
+      store(:exec_time, :sketch, sketch([3, 4]), %{"queue" => "alpha"}, timestamp: ts(-1))
+      store(:exec_time, :sketch, sketch([3, 4]), %{"queue" => "gamma"}, timestamp: ts(-1))
 
       assert %{"all" => sketch} = latest(:exec_time)
 
-      assert 6 == Sketch.size(sketch)
+      assert 4 == Sketch.size(sketch)
       assert_in_delta Sketch.quantile(sketch, 0.0), 1.0, 0.2
       assert_in_delta Sketch.quantile(sketch, 1.0), 3.0, 0.2
     end
@@ -92,23 +85,23 @@ defmodule Oban.Met.RecorderTest do
     test "grouping the latest values by a label" do
       store(:exec, :gauge, 4, %{"node" => "web.2", "queue" => "alpha"})
       store(:exec, :gauge, 3, %{"node" => "web.2", "queue" => "gamma"})
-      store(:exec, :delta, 4, %{"node" => "web.1", "queue" => "alpha"})
-      store(:exec, :delta, 3, %{"node" => "web.1", "queue" => "gamma"})
+      store(:exec, :gauge, 4, %{"node" => "web.1", "queue" => "alpha"})
+      store(:exec, :gauge, 3, %{"node" => "web.1", "queue" => "gamma"})
 
-      assert %{"alpha" => 8, "gamma" => 6} = latest(:exec, group: :queue)
-      assert %{"web.1" => 7, "web.2" => 7} = latest(:exec, group: :node)
+      assert %{"alpha" => 4, "gamma" => 3} = latest(:exec, group: :queue)
+      assert %{"web.1" => 3, "web.2" => 3} = latest(:exec, group: :node)
     end
 
     test "filtering the latest values by a label" do
-      store(:executing, :delta, 4, %{"node" => "web.1", "queue" => "alpha"})
-      store(:executing, :delta, 3, %{"node" => "web.2", "queue" => "gamma"})
-      store(:executing, :delta, 2, %{"node" => "web.2", "queue" => "alpha"})
+      store(:executing, :gauge, 4, %{"node" => "web.1", "queue" => "alpha"})
+      store(:executing, :gauge, 3, %{"node" => "web.2", "queue" => "gamma"})
+      store(:executing, :gauge, 2, %{"node" => "web.2", "queue" => "alpha"})
 
-      assert %{"all" => 4} = latest(:executing, filters: [node: "web.1"])
-      assert %{"all" => 5} = latest(:executing, filters: [node: ["web.2"]])
-      assert %{"all" => 9} = latest(:executing, filters: [node: ["web.1", "web.2"]])
-      assert %{"all" => 4} = latest(:executing, filters: [node: ["web.1"], queue: ["alpha"]])
-      assert %{"all" => _} = latest(:executing, filters: [node: ["web.1"], queue: ["gamma"]])
+      assert %{"all" => 4} == latest(:executing, filters: [node: "web.1"])
+      assert %{"all" => 5} == latest(:executing, filters: [node: ["web.2"]])
+      assert %{"all" => 9} == latest(:executing, filters: [node: ["web.1", "web.2"]])
+      assert %{"all" => 4} == latest(:executing, filters: [node: ["web.1"], queue: ["alpha"]])
+      assert %{} == latest(:executing, filters: [node: ["web.1"], queue: ["gamma"]])
     end
   end
 
@@ -116,12 +109,12 @@ defmodule Oban.Met.RecorderTest do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
     test "slicing gauges by small periods" do
-      store(:executing, :delta, +1, %{"queue" => "alpha"}, timestamp: ts(-1))
-      store(:executing, :delta, -1, %{"queue" => "alpha"}, timestamp: ts(-2))
-      store(:executing, :gauge, +4, %{"queue" => "alpha"}, timestamp: ts(-3))
-      store(:executing, :delta, -1, %{"queue" => "alpha"}, timestamp: ts(-4))
-      store(:executing, :delta, -1, %{"queue" => "alpha"}, timestamp: ts(-5))
-      store(:executing, :gauge, +5, %{"queue" => "alpha"}, timestamp: ts(-6))
+      store(:executing, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts(-1))
+      store(:executing, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts(-2))
+      store(:executing, :gauge, 4, %{"queue" => "alpha"}, timestamp: ts(-3))
+      store(:executing, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts(-4))
+      store(:executing, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts(-5))
+      store(:executing, :gauge, 5, %{"queue" => "alpha"}, timestamp: ts(-6))
 
       assert [{ts, value, label} | _] = timeslice(:executing)
 

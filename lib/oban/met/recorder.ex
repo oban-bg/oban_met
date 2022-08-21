@@ -64,17 +64,26 @@ defmodule Oban.Met.Recorder do
   def latest(name, series, opts \\ []) do
     {:ok, table} = Registry.meta(Oban.Registry, name)
 
-    table
-    |> select(series, opts[:lookback])
-    |> filter_metrics(opts[:filters])
-    |> group_metrics(opts[:group])
-    |> Map.new(fn {group, metrics} ->
-      value =
-        metrics
-        |> sort_metrics()
-        |> reduce_metrics()
+    since = Keyword.get(opts, :lookback, 5)
+    match = {{to_string(series), :"$1", :"$2"}, :_, :_, :_}
+    guard = filters_to_guards(opts[:filters], {:>=, :"$2", since})
 
-      {group, value}
+    grouper = fn {{_, labels, _}, _, _, _} ->
+      case opts[:group] do
+        nil -> labels
+        group -> labels[to_string(group)]
+      end
+    end
+
+    table
+    |> :ets.select_reverse([{match, [guard], [:"$_"]}])
+    |> Enum.group_by(grouper)
+    |> Enum.reduce(%{}, fn {group, [{_, _, _, value} | _]}, acc ->
+      if is_binary(group) do
+        Map.put(acc, group, value)
+      else
+        Map.update(acc, "all", value, &merge(&1, value))
+      end
     end)
   end
 
@@ -219,8 +228,9 @@ defmodule Oban.Met.Recorder do
     for %{"name" => series, "type" => type, "value" => value} = labels <- metrics do
       type = String.to_existing_atom(type)
       labels = Map.drop(labels, ["name", "type", "value"])
+      value = if match?(%{"data" => _}, value), do: Sketch.from_map(value), else: value
 
-      store(state.table, series, type, cast_value(value, type), labels)
+      store(state.table, series, type, value, labels)
     end
 
     {:noreply, state}
@@ -290,10 +300,23 @@ defmodule Oban.Met.Recorder do
     %State{state | checkpoint: {mod, opts}, checkpoint_timer: timer}
   end
 
-  defp cast_value(%{"data" => _} = value, "sketch"), do: Sketch.from_map(value)
-  defp cast_value(value, _type), do: value
-
   # Fetching & Filtering
+
+  defp filters_to_guards(nil, base), do: base
+
+  defp filters_to_guards(filters, base) do
+    Enum.reduce(filters, base, fn {field, values}, and_acc ->
+      and_guard =
+        values
+        |> List.wrap()
+        |> Enum.map(fn value -> {:==, {:map_get, to_string(field), :"$1"}, value} end)
+        |> Enum.reduce(fn or_guard, or_acc -> {:orelse, or_guard, or_acc} end)
+
+      {:andalso, and_guard, and_acc}
+    end)
+  end
+
+  # OLDER-DELETE THESE
 
   defp select(table, series, nil), do: select(table, series, 60)
 
@@ -306,16 +329,6 @@ defmodule Oban.Met.Recorder do
     :ets.select(table, [{match, guard, [{{:"$1", :"$2", :"$3", :"$4"}}]}])
   end
 
-  defp group_metrics(metrics, nil), do: %{"all" => metrics}
-
-  defp group_metrics(metrics, group) do
-    Enum.group_by(metrics, &get_in(&1, [Access.elem(3), to_string(group)]))
-  end
-
-  defp sort_metrics(metrics) do
-    Enum.sort_by(metrics, fn {max_ts, _type, _value, _labels} -> -max_ts end)
-  end
-
   defp filter_metrics(metrics, nil), do: metrics
 
   defp filter_metrics(metrics, filters) do
@@ -323,18 +336,6 @@ defmodule Oban.Met.Recorder do
 
     Enum.filter(metrics, fn {_max_ts, _type, _value, labels} ->
       Enum.all?(filters, fn {name, list} -> labels[name] in list end)
-    end)
-  end
-
-  defp reduce_metrics([]), do: nil
-
-  defp reduce_metrics([{_max_ts, _type, value, _labels} | tail]) do
-    Enum.reduce_while(tail, value, fn {_max_ts, type, value, _labels}, acc ->
-      case type do
-        :gauge -> {:halt, acc + value}
-        :delta -> {:cont, acc + value}
-        :sketch -> {:cont, Sketch.merge(value, acc)}
-      end
     end)
   end
 
