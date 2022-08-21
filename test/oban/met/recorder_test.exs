@@ -122,10 +122,10 @@ defmodule Oban.Met.RecorderTest do
       assert is_float(value)
       refute label
 
-      assert [4, 3, 4, 3, 4, 5] = timeslice_values(:executing)
-      assert [4, 4, 4, 5] = timeslice_values(:executing, by: 2)
-      assert [4, 4, 5] = timeslice_values(:executing, by: 3)
-      assert [4, 5] = timeslice_values(:executing, by: 5)
+      assert [5, 1, 1, 4, 1, 1] = timeslice_values(:executing)
+      assert [5, 4, 1] = timeslice_values(:executing, by: 2)
+      assert [5, 4] = timeslice_values(:executing, by: 3)
+      assert [5] = timeslice_values(:executing, by: 6)
     end
 
     test "slicing gauges by groups" do
@@ -135,7 +135,7 @@ defmodule Oban.Met.RecorderTest do
         store(:exec_time, :gauge, value, labels, timestamp: ts(ts))
       end
 
-      assert [{_, _, "alpha"}, {_, _, "alpha"} | _] = timeslice(:exec_time, label: :queue)
+      assert [{_, _, "alpha"}, {_, _, "alpha"} | _] = timeslice(:exec_time, label: "queue")
     end
   end
 
@@ -222,7 +222,7 @@ defmodule Oban.Met.RecorderTest do
 
     test "compacting metrics multiple times is idempotent" do
       for queue <- [:alpha, :gamma], offset <- 1..61 do
-        store(:a, :gauge, 1, %{queue: queue}, timestamp: ts(-offset))
+        store(:a, :gauge, 1, %{"queue" => queue}, timestamp: ts(-offset))
       end
 
       compact([{5, 60}])

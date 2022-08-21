@@ -91,18 +91,20 @@ defmodule Oban.Met.Recorder do
   def timeslice(name, series, opts \\ []) do
     {:ok, table} = Registry.meta(Oban.Registry, name)
 
+    label = Keyword.get(opts, :label, :any)
+    ntile = Keyword.get(opts, :ntile, 1.0)
+    since = Keyword.get(opts, :lookback, 5)
     slice = Keyword.get(opts, :by, 1)
-    label = to_string(Keyword.get(opts, :label, :any))
-    ntile = Keyword.get(opts, :quantile, 1.0)
-    now = System.system_time(:second)
+    systm = System.system_time(:second)
+
+    match = {{to_string(series), :"$1", :"$2"}, :_, :_, :_}
+    guard = filters_to_guards(opts[:filters], {:>=, :"$2", since})
 
     table
-    |> select(series, opts[:lookback])
-    |> filter_metrics(opts[:filters])
-    |> rewrite_deltas()
-    |> Enum.map(fn {ts, value, labels} -> {ts, to_sketch(value), labels[label]} end)
-    |> Enum.sort_by(&elem(&1, 2))
-    |> Enum.chunk_by(fn {ts, _, label} -> {label, div(now - ts, slice)} end)
+    |> :ets.select_reverse([{match, [guard], [:"$_"]}])
+    |> Enum.map(fn {{_, labels, ts}, _, _, value} -> {ts, to_sketch(value), labels[label]} end)
+    |> Enum.sort_by(fn {ts, _, label} -> {label, ts} end)
+    |> Enum.chunk_by(fn {ts, _, label} -> {label, div(systm - ts - 1, slice)} end)
     |> Enum.map(&merge_metrics(&1, ntile))
   end
 
@@ -175,8 +177,11 @@ defmodule Oban.Met.Recorder do
     end
   end
 
-  defp compact([{{series, labels, min_ts}, _, type, _} | _] = metrics) do
-    max_ts = metrics |> List.last() |> elem(1)
+  defp compact([{{series, labels, _}, _, type, _} | _] = metrics) do
+    {min_ts, max_ts} =
+      metrics
+      |> Enum.flat_map(fn {{_, _, max_ts}, min_ts, _, _} -> [max_ts, min_ts] end)
+      |> Enum.min_max()
 
     value =
       Enum.reduce(metrics, Sketch.new(), fn {_key, _min, _type, value}, acc ->
@@ -314,43 +319,6 @@ defmodule Oban.Met.Recorder do
 
       {:andalso, and_guard, and_acc}
     end)
-  end
-
-  # OLDER-DELETE THESE
-
-  defp select(table, series, nil), do: select(table, series, 60)
-
-  defp select(table, series, lookback) do
-    since = System.system_time(:second) - lookback
-
-    match = {series, :_, :"$1", :"$2", :"$3", :"$4"}
-    guard = [{:>=, :"$1", since}]
-
-    :ets.select(table, [{match, guard, [{{:"$1", :"$2", :"$3", :"$4"}}]}])
-  end
-
-  defp filter_metrics(metrics, nil), do: metrics
-
-  defp filter_metrics(metrics, filters) do
-    filters = Map.new(filters, fn {key, val} -> {to_string(key), List.wrap(val)} end)
-
-    Enum.filter(metrics, fn {_max_ts, _type, _value, labels} ->
-      Enum.all?(filters, fn {name, list} -> labels[name] in list end)
-    end)
-  end
-
-  defp rewrite_deltas([{_, :sketch, _, _} | _] = metrics), do: metrics
-
-  defp rewrite_deltas(metrics) do
-    metrics
-    |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.reduce({0, []}, fn {ts, type, value, labels}, {sum, acc} ->
-      case type do
-        :gauge -> {value, [{ts, value, labels} | acc]}
-        :delta -> {sum + value, [{ts, sum + value, labels} | acc]}
-      end
-    end)
-    |> elem(1)
   end
 
   defp to_sketch(int) when is_integer(int), do: Sketch.new([int])
