@@ -75,11 +75,9 @@ defmodule Oban.Met.RecorderTest do
       store(:exec_time, :sketch, sketch([3, 4]), %{"queue" => "alpha"}, timestamp: ts(-1))
       store(:exec_time, :sketch, sketch([3, 4]), %{"queue" => "gamma"}, timestamp: ts(-1))
 
-      assert %{"all" => sketch} = latest(:exec_time)
+      assert %{"all" => ntile} = latest(:exec_time)
 
-      assert 4 == Sketch.size(sketch)
-      assert_in_delta Sketch.quantile(sketch, 0.0), 1.0, 0.2
-      assert_in_delta Sketch.quantile(sketch, 1.0), 3.0, 0.2
+      assert_in_delta ntile, 3.0, 0.2
     end
 
     test "grouping the latest values by a label" do
@@ -88,8 +86,8 @@ defmodule Oban.Met.RecorderTest do
       store(:exec, :gauge, 4, %{"node" => "web.1", "queue" => "alpha"})
       store(:exec, :gauge, 3, %{"node" => "web.1", "queue" => "gamma"})
 
-      assert %{"alpha" => 4, "gamma" => 3} = latest(:exec, group: :queue)
-      assert %{"web.1" => 3, "web.2" => 3} = latest(:exec, group: :node)
+      assert %{"alpha" => 8, "gamma" => 6} = latest(:exec, group: "queue")
+      assert %{"web.1" => 7, "web.2" => 7} = latest(:exec, group: "node")
     end
 
     test "filtering the latest values by a label" do
@@ -245,6 +243,16 @@ defmodule Oban.Met.RecorderTest do
                :a
                |> lookup()
                |> Enum.map(&get_in(&1, [Access.elem(0), Access.elem(1), :queue]))
+    end
+
+    test "compacted gauges return the rounded maximum quantile" do
+      store(:a, :gauge, 1, %{queue: :alpha}, timestamp: ts(-1))
+      store(:a, :gauge, 1, %{queue: :alpha}, timestamp: ts(-2))
+      store(:a, :gauge, 1, %{queue: :alpha}, timestamp: ts(-3))
+
+      compact([{5, 60}])
+
+      assert %{"all" => 1} = latest(:a)
     end
   end
 

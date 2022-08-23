@@ -15,6 +15,7 @@ defmodule Oban.Met.Recorder do
   @type label :: String.t() | nil
   @type labels :: %{optional(String.t()) => label()}
   @type ts :: integer()
+  @type period :: {pos_integer(), pos_integer()}
 
   @periods [
     # 1s for 2m
@@ -65,25 +66,34 @@ defmodule Oban.Met.Recorder do
     {:ok, table} = Registry.meta(Oban.Registry, name)
 
     since = Keyword.get(opts, :lookback, 5)
+    group = Keyword.get(opts, :group, nil)
+    ntile = Keyword.get(opts, :ntile, 1.0)
     match = {{to_string(series), :"$1", :"$2"}, :_, :_, :_}
     guard = filters_to_guards(opts[:filters], {:>=, :"$2", since})
 
-    grouper = fn {{_, labels, _}, _, _, _} ->
-      case opts[:group] do
-        nil -> labels
-        group -> labels[to_string(group)]
-      end
-    end
-
     table
     |> :ets.select_reverse([{match, [guard], [:"$_"]}])
-    |> Enum.group_by(grouper)
-    |> Enum.reduce(%{}, fn {group, [{_, _, _, value} | _]}, acc ->
-      if is_binary(group) do
-        Map.put(acc, group, value)
-      else
-        Map.update(acc, "all", value, &merge(&1, value))
-      end
+    |> Enum.map(fn metric -> update_in(metric, [Access.elem(3)], &to_sketch/1) end)
+    |> Enum.dedup_by(fn {{_, labels, _}, _, _, _} -> labels end)
+    |> Enum.group_by(fn {{_, labels, _}, _, _, _} -> labels[group] end)
+    |> Map.new(fn {group, [{_, _, type, _} | _] = metrics} ->
+      merged =
+        case type do
+          :gauge ->
+            metrics
+            |> get_in([Access.all(), Access.elem(3)])
+            |> Enum.map(&Sketch.quantile(&1, 1.0))
+            |> Enum.sum()
+            |> round()
+
+          :sketch ->
+            metrics
+            |> get_in([Access.all(), Access.elem(3)])
+            |> Enum.reduce(&Sketch.merge/2)
+            |> Sketch.quantile(ntile)
+        end
+
+      {group || "all", merged}
     end)
   end
 
@@ -151,6 +161,7 @@ defmodule Oban.Met.Recorder do
   defp merge(old, new), do: old + new
 
   @doc false
+  @spec compact(name_or_table(), [period()]) :: any()
   def compact(table, periods) when is_reference(table) and is_list(periods) do
     delete_outdated(table, periods)
 
