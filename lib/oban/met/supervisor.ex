@@ -27,14 +27,14 @@ defmodule Oban.Met.Supervisor do
   def init(opts) do
     conf = Keyword.fetch!(opts, :conf)
 
-    rep_name = Registry.via(conf.name, Reporter)
     rec_name = Registry.via(conf.name, Recorder)
+    rep_name = Registry.via(conf.name, Reporter)
 
     children = [
       {Recorder, conf: conf, name: rec_name},
       {Reporter, conf: conf, name: rep_name}
     ]
 
-    Supervisor.init(children, strategy: :rest_for_one)
+    Supervisor.init(children, strategy: :one_for_one)
   end
 end
