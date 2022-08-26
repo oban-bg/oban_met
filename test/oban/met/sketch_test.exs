@@ -4,7 +4,7 @@ defmodule Oban.Met.SketchTest do
 
   alias Oban.Met.Sketch
 
-  doctest Oban.Met.Sketch
+  doctest Sketch
 
   property "all values are stored for quantile estimation" do
     check all values <- list_of(positive_integer(), min_length: 1) do
