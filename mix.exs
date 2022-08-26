@@ -8,7 +8,14 @@ defmodule Oban.Met.MixProject do
       elixir: "~> 1.13",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      aliases: aliases(),
+      preferred_cli_env: [
+        "ecto.gen.migration": :test,
+        "test.ci": :test,
+        "test.reset": :test,
+        "test.setup": :test
+      ],
     ]
   end
 
@@ -19,6 +26,20 @@ defmodule Oban.Met.MixProject do
     [
       extra_applications: [:logger],
       mod: {Oban.Met.Application, []}
+    ]
+  end
+
+  def aliases do
+    [
+      "test.reset": ["ecto.drop -r Oban.Met.Repo", "test.setup"],
+      "test.setup": ["ecto.create -r Oban.Met.Repo --quiet", "ecto.migrate -r Oban.Met.Repo"],
+      "test.ci": [
+        "format --check-formatted",
+        "deps.unlock --check-unused",
+        "credo",
+        "test --raise",
+        "dialyzer"
+      ]
     ]
   end
 

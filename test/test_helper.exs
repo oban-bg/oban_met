@@ -1,3 +1,3 @@
-Application.put_env(:stream_data, :max_runs, 40)
-
+Oban.Met.Repo.start_link()
 ExUnit.start()
+Ecto.Adapters.SQL.Sandbox.mode(Oban.Met.Repo, :manual)
