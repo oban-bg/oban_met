@@ -1,22 +1,49 @@
 defmodule Oban.Met.ReporterTest do
-  use ExUnit.Case, async: true
+  use Oban.Met.Case
 
   import :telemetry, only: [execute: 3]
 
   alias Oban.{Job, Notifier}
-  alias Oban.Met.{Reporter, Sketch}
+  alias Oban.Met.{Repo, Reporter, Sketch}
 
   @opts [
     node: "worker.1",
     notifier: Oban.Notifiers.PG,
-    prefix: "reporter",
     repo: Oban.Met.Repo,
-    testing: :inline
+    testing: :manual
   ]
   @name Oban.Reporter
 
+  describe "checkpoints" do
+    setup :start_supervised_oban
+
+    test "broadcasting current queue and state gauges", %{conf: conf} do
+      pid = start_supervised!({Reporter, conf: conf, name: @name})
+
+      queues = ~w(alpha gamma delta)
+      states = Job.states()
+
+      for queue <- queues, state <- states do
+        %{}
+        |> Job.new(queue: queue, state: to_string(state), worker: "Bogus")
+        |> Repo.insert!()
+      end
+
+      send(pid, :checkpoint)
+
+      Process.sleep(10)
+
+      metrics = Reporter.all_metrics(pid)
+
+      assert length(metrics) == length(states) * length(queues)
+
+      assert [:gauge] = for({%{type: type}, _} <- metrics, uniq: true, do: type)
+      assert [1] = for({_, value} <- metrics, uniq: true, do: value)
+    end
+  end
+
   describe "capturing" do
-    setup :start_supervised_reporter
+    setup [:start_supervised_oban, :start_supervised_reporter]
 
     test "capturing job start counts", %{conf: conf, pid: pid} do
       meta = %{conf: conf, job: %Job{queue: "default"}}
@@ -27,8 +54,8 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert +3 == find_metric(metrics, name: :executing)
-      assert -3 == find_metric(metrics, name: :available)
+      assert +3 == find_metric(metrics, series: :executing)
+      assert -3 == find_metric(metrics, series: :available)
     end
 
     test "capturing job stop and exception counts", %{conf: conf, pid: pid} do
@@ -44,12 +71,12 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert -6 = find_metric(metrics, name: :executing)
-      assert 1 = find_metric(metrics, name: :cancelled)
-      assert 2 = find_metric(metrics, name: :completed)
-      assert 1 = find_metric(metrics, name: :discarded)
-      assert 1 = find_metric(metrics, name: :retryable)
-      assert 1 = find_metric(metrics, name: :scheduled)
+      assert -6 = find_metric(metrics, series: :executing)
+      assert 1 = find_metric(metrics, series: :cancelled)
+      assert 2 = find_metric(metrics, series: :completed)
+      assert 1 = find_metric(metrics, series: :discarded)
+      assert 1 = find_metric(metrics, series: :retryable)
+      assert 1 = find_metric(metrics, series: :scheduled)
     end
 
     test "capturing counts separately for every queue", %{conf: conf, pid: pid} do
@@ -62,8 +89,8 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert 2 == find_metric(metrics, name: :executing, queue: "alpha")
-      assert 1 == find_metric(metrics, name: :executing, queue: "gamma")
+      assert 2 == find_metric(metrics, series: :executing, queue: "alpha")
+      assert 1 == find_metric(metrics, series: :executing, queue: "gamma")
     end
 
     test "capturing job stop measurements", %{conf: conf, pid: pid} do
@@ -75,13 +102,13 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert %Sketch{size: 3} = find_metric(metrics, name: :exec_time)
-      assert %Sketch{size: 3} = find_metric(metrics, name: :wait_time)
+      assert %Sketch{size: 3} = find_metric(metrics, series: :exec_time)
+      assert %Sketch{size: 3} = find_metric(metrics, series: :wait_time)
     end
   end
 
   describe "reporting" do
-    setup :start_supervised_reporter
+    setup [:start_supervised_oban, :start_supervised_reporter]
 
     test "reporting captured metrics", %{conf: conf, pid: pid} do
       :ok = Notifier.listen(conf.name, [:gossip])
@@ -97,7 +124,7 @@ defmodule Oban.Met.ReporterTest do
 
       assert %{"name" => _, "metrics" => metrics} = payload
 
-      metrics = Map.new(metrics, fn map -> {map["name"], map} end)
+      metrics = Map.new(metrics, fn map -> {map["series"], map} end)
 
       assert %{"queue" => "default", "type" => "delta", "value" => 0} = metrics["executing"]
       assert %{"queue" => "default", "type" => "delta", "value" => -3} = metrics["available"]
@@ -131,12 +158,17 @@ defmodule Oban.Met.ReporterTest do
     |> elem(1)
   end
 
-  defp start_supervised_reporter(_context) do
+  defp start_supervised_oban(_context) do
     name = make_ref()
     start_supervised!({Oban, Keyword.put(@opts, :name, name)})
 
     conf = Oban.config(name)
-    pid = start_supervised!({Reporter, conf: conf, interval: 10, name: @name})
+
+    {:ok, conf: conf}
+  end
+
+  defp start_supervised_reporter(%{conf: conf}) do
+    pid = start_supervised!({Reporter, conf: conf, report_interval: 10, name: @name})
 
     {:ok, conf: conf, pid: pid}
   end

@@ -13,33 +13,25 @@ defmodule Oban.Met.RecorderTest do
     testing: :inline
   ]
 
-  defmodule Checkpoint do
-    @behaviour Oban.Met.Checkpoint
+  describe "store/5" do
+    setup [:start_supervised_oban, :start_supervised_recorder]
 
-    alias Oban.Met.Checkpoint
+    test "gauges never drop below 0 with negative deltas" do
+      store(:available, :gauge, +1, %{"queue" => "alpha"})
+      store(:available, :delta, -1, %{"queue" => "alpha"})
+      store(:available, :delta, -1, %{"queue" => "alpha"})
 
-    @impl Checkpoint
-    def call(conf) do
-      metrics = [
-        {:available, 7, %{queue: "alpha"}},
-        {:available, 8, %{queue: "gamma"}},
-        {:available, 9, %{queue: "delta"}}
-      ]
-
-      send(conf[:pid], :checkpoint)
-
-      {metrics, conf}
+      assert %{"all" => 0} = latest(:available)
     end
 
-    @impl Checkpoint
-    def interval(conf), do: {conf[:interval], conf}
+    # NOTE: Handle a recently compacted sketch and a delta without a gauge?
   end
 
   describe "lookup/2" do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
     test "fetching metrics stored with pubsub notifications", %{pid: pid} do
-      metrics = [%{name: :exec, node: @node, queue: :default, type: :gauge, value: 1}]
+      metrics = [%{series: :exec, node: @node, queue: :default, type: :gauge, value: 1}]
 
       payload =
         %{node: @node, metrics: metrics}
@@ -134,22 +126,6 @@ defmodule Oban.Met.RecorderTest do
       end
 
       assert [{_, _, "alpha"}, {_, _, "alpha"} | _] = timeslice(:exec_time, label: "queue")
-    end
-  end
-
-  describe "checkpoints" do
-    setup :start_supervised_oban
-
-    test "storing checkpoint output as guages", %{conf: conf} do
-      start_supervised!(
-        {Recorder, conf: conf, name: @name, checkpoint: {Checkpoint, interval: 1, pid: self()}}
-      )
-
-      assert_receive :checkpoint
-
-      assert metrics = Recorder.lookup(@name, :available)
-
-      assert 3 == length(metrics)
     end
   end
 

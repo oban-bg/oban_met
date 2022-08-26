@@ -5,11 +5,21 @@ defmodule Oban.Met.Reporter do
 
   use GenServer
 
+  import Ecto.Query, only: [group_by: 3, select: 3]
+
   alias __MODULE__, as: State
   alias Oban.Met.Sketch
-  alias Oban.Notifier
+  alias Oban.{Job, Notifier, Peer, Repo}
 
-  defstruct [:conf, :name, :table, :timer, interval: :timer.seconds(1)]
+  defstruct [
+    :checkpoint_timer,
+    :conf,
+    :name,
+    :report_timer,
+    :table,
+    checkpoint_interval: :timer.minutes(1),
+    report_interval: :timer.seconds(1)
+  ]
 
   @trans_state %{
     cancelled: :cancelled,
@@ -51,14 +61,21 @@ defmodule Oban.Met.Reporter do
       State
       |> struct!(Keyword.put(opts, :table, table))
       |> attach_events()
-      |> schedule_report()
 
-    {:ok, state}
+    {:ok, state, {:continue, :checkpoint}}
   end
 
   @impl GenServer
-  def terminate(_reason, %State{timer: timer} = state) do
-    if is_reference(timer), do: Process.cancel_timer(timer)
+  def handle_continue(:checkpoint, %State{} = state) do
+    {:noreply, state} = handle_info(:checkpoint, state)
+
+    {:noreply, schedule_report(state)}
+  end
+
+  @impl GenServer
+  def terminate(_reason, %State{checkpoint_timer: ct, report_timer: rt} = state) do
+    if is_reference(rt), do: Process.cancel_timer(rt)
+    if is_reference(ct), do: Process.cancel_timer(ct)
 
     :telemetry.detach(handler_id(state))
 
@@ -66,10 +83,31 @@ defmodule Oban.Met.Reporter do
   end
 
   @impl GenServer
+  def handle_info(:checkpoint, %State{conf: conf, table: table} = state) do
+    # TODO: Guard against connection errors, this needs a backoff
+    query =
+      Job
+      |> group_by([j], [j.queue, j.state])
+      |> select([j], {j.queue, j.state, count(j.id)})
+
+    for {queue, state, count} <- Repo.all(conf, query, timeout: :infinity) do
+      :ets.insert(table, {%{series: state, type: :gauge, queue: queue}, count})
+    end
+
+    {:noreply, schedule_checkpoint(state)}
+  end
+
+  @impl GenServer
   def handle_info(:report, %State{conf: conf, table: table} = state) do
+    sorting = fn
+      {%{type: :gauge}, _} -> 0
+      {_, _} -> 1
+    end
+
     metrics =
       table
       |> :ets.tab2list()
+      |> Enum.sort_by(sorting)
       |> Enum.map(fn {labels, value} ->
         labels
         |> Map.put(:node, conf.node)
@@ -90,10 +128,18 @@ defmodule Oban.Met.Reporter do
 
   # Telemetry Events
 
+  @events [
+    [:oban, :job, :start],
+    [:oban, :job, :stop],
+    [:oban, :job, :exception],
+    [:oban, :engine, :insert_job, :stop],
+    [:oban, :engine, :insert_all_jobs, :stop],
+  ]
+
   defp attach_events(%State{conf: conf, table: table} = state) do
     :telemetry.attach_many(
       handler_id(state),
-      [[:oban, :job, :start], [:oban, :job, :stop], [:oban, :job, :exception]],
+      @events,
       &__MODULE__.handle_event/4,
       {conf, table}
     )
@@ -106,26 +152,47 @@ defmodule Oban.Met.Reporter do
   end
 
   @doc false
-  def handle_event([:oban, :job, :start], _measure, %{conf: conf} = meta, {conf, tab}) do
+  def handle_event([:oban | event], measure, %{conf: conf} = meta, {conf, tab}) do
+    track_event(event, measure, meta, tab)
+  end
+
+  def handle_event(_event, _measure, _meta, _conf), do: :ok
+
+  @doc false
+  def track_event([:job, :start], _measure, meta, tab) do
     insert_or_update(tab, [
-      {%{name: :available, queue: meta.job.queue, type: :delta}, -1},
-      {%{name: :executing, queue: meta.job.queue, type: :delta}, 1}
+      {%{series: :available, queue: meta.job.queue, type: :delta}, -1},
+      {%{series: :executing, queue: meta.job.queue, type: :delta}, 1}
     ])
   end
 
-  def handle_event([:oban, :job, _], measure, %{conf: conf} = meta, {conf, tab}) do
+  def track_event([:job, _], measure, meta, tab) do
     %{job: %{queue: queue, worker: worker}} = meta
     %{duration: exec_time, queue_time: wait_time} = measure
 
     insert_or_update(tab, [
-      {%{name: :executing, queue: queue, type: :delta}, -1},
-      {%{name: @trans_state[meta.state], queue: queue, type: :delta}, 1},
-      {%{name: :exec_time, queue: queue, type: :sketch, worker: worker}, exec_time},
-      {%{name: :wait_time, queue: queue, type: :sketch, worker: worker}, wait_time}
+      {%{series: :executing, queue: queue, type: :delta}, -1},
+      {%{series: @trans_state[meta.state], queue: queue, type: :delta}, 1},
+      {%{series: :exec_time, queue: queue, type: :sketch, worker: worker}, exec_time},
+      {%{series: :wait_time, queue: queue, type: :sketch, worker: worker}, wait_time}
     ])
   end
 
-  def handle_event(_event, _measure, _meta, _conf), do: :ok
+  def track_event([:engine, :insert_job, _], _, %{job: job}, tab) do
+    series = if job.state == "scheduled", do: :scheduled, else: :available
+
+    insert_or_update(tab, [
+      {%{series: series, queue: job.queue, type: :delta}, 1}
+    ])
+  end
+
+  def track_event([:engine, :insert_all_jobs, _], _, %{changesets: changesets}, tab) do
+    IO.inspect(changesets, label: "CHANGESETS")
+
+    :ok
+  end
+
+  def track_event(_event, _measure, _meta, _tab), do: :ok
 
   defp insert_or_update(table, objects) when is_list(objects) do
     for object <- objects, do: insert_or_update(table, object)
@@ -152,9 +219,15 @@ defmodule Oban.Met.Reporter do
 
   # Scheduling
 
-  defp schedule_report(state) do
-    timer = Process.send_after(self(), :report, state.interval)
+  defp schedule_checkpoint(state) do
+    timer = Process.send_after(self(), :report, state.checkpoint_interval)
 
-    %{state | timer: timer}
+    %{state | checkpoint_timer: timer}
+  end
+
+  defp schedule_report(state) do
+    timer = Process.send_after(self(), :report, state.report_interval)
+
+    %{state | report_timer: timer}
   end
 end

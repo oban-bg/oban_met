@@ -29,8 +29,6 @@ defmodule Oban.Met.Recorder do
   ]
 
   defstruct [
-    :checkpoint,
-    :checkpoint_timer,
     :compact_timer,
     :conf,
     :name,
@@ -131,10 +129,10 @@ defmodule Oban.Met.Recorder do
         :ets.insert(table, {key, ts, type, merge(old_value, value)})
 
       {:delta, {{^series, ^labels, _max_ts}, _min_ts, :gauge, old_value}} ->
-        :ets.insert(table, {{series, labels, ts}, ts, type, merge(old_value, value)})
+        :ets.insert(table, {{series, labels, ts}, ts, :gauge, merge(old_value, value)})
 
       {:delta, nil} ->
-        raise "missing gauge"
+        :ets.insert(table, {{series, labels, ts}, ts, :gauge, value})
 
       {_type, _object} ->
         :ets.insert(table, {{series, labels, ts}, ts, type, value})
@@ -158,7 +156,7 @@ defmodule Oban.Met.Recorder do
 
   defp merge(%Sketch{} = old, %Sketch{} = new), do: Sketch.merge(old, new)
   defp merge(%Sketch{} = old, new), do: Sketch.insert(old, new)
-  defp merge(old, new), do: old + new
+  defp merge(old, new), do: max(0, old + new)
 
   @doc false
   @spec compact(name_or_table(), [period()]) :: any()
@@ -231,7 +229,6 @@ defmodule Oban.Met.Recorder do
       State
       |> struct!(Keyword.put(opts, :table, table))
       |> subscribe_gossip()
-      |> schedule_checkpoint()
       |> schedule_compact()
 
     Registry.put_meta(Oban.Registry, state.name, table)
@@ -241,7 +238,7 @@ defmodule Oban.Met.Recorder do
 
   @impl GenServer
   def handle_info({:notification, :gossip, %{"metrics" => metrics}}, %State{} = state) do
-    for %{"name" => series, "type" => type, "value" => value} = labels <- metrics do
+    for %{"series" => series, "type" => type, "value" => value} = labels <- metrics do
       type = String.to_existing_atom(type)
       labels = Map.drop(labels, ["name", "type", "value"])
       value = if match?(%{"data" => _}, value), do: Sketch.from_map(value), else: value
@@ -256,30 +253,10 @@ defmodule Oban.Met.Recorder do
     {:noreply, state}
   end
 
-  def handle_info(:checkpoint, %State{checkpoint: {mod, opts}, table: table} = state) do
-    parent = self()
-
-    Task.async(fn ->
-      {metrics, opts} = mod.call(opts)
-
-      for {series, value, labels} <- metrics, do: store(table, series, :gauge, value, labels)
-
-      send(parent, {:schedule_checkpoint, opts})
-    end)
-
-    {:noreply, state}
-  end
-
   def handle_info(:compact, %State{compact_periods: periods, table: table} = state) do
-    Task.async(__MODULE__, :compact, [table, periods])
+    Task.start(__MODULE__, :compact, [table, periods])
 
     {:noreply, schedule_compact(state)}
-  end
-
-  def handle_info({:schedule_checkpoint, opts}, %State{checkpoint: {mod, _}} = state) do
-    state = %State{state | checkpoint: {mod, opts}}
-
-    {:noreply, schedule_checkpoint(state)}
   end
 
   # Scheduling
@@ -304,16 +281,6 @@ defmodule Oban.Met.Recorder do
     timer = Process.send_after(self(), :compact, interval)
 
     %State{state | compact_timer: timer}
-  end
-
-  defp schedule_checkpoint(%State{checkpoint: nil} = state), do: state
-
-  defp schedule_checkpoint(%State{checkpoint: {mod, opts}} = state) do
-    {interval, opts} = mod.interval(opts)
-
-    timer = Process.send_after(self(), :checkpoint, interval)
-
-    %State{state | checkpoint: {mod, opts}, checkpoint_timer: timer}
   end
 
   # Fetching & Filtering
