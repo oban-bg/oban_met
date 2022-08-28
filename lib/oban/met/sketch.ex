@@ -34,7 +34,7 @@ defmodule Oban.Met.Sketch do
   """
   @spec new([pos_integer()]) :: t()
   def new(values \\ []) do
-    Enum.reduce(values, %Sketch{}, &insert(&2, &1))
+    Enum.reduce(values, %Sketch{}, &add(&2, &1))
   end
 
   @doc """
@@ -42,11 +42,9 @@ defmodule Oban.Met.Sketch do
 
   ## Examples
 
-      iex> sketch_1 = Oban.Met.Sketch.new()
-      ...> sketch_1 = Oban.Met.Sketch.insert(sketch_1, 1)
+      iex> sketch_1 = Oban.Met.Sketch.new([1])
       ...>
-      ...> Oban.Met.Sketch.new()
-      ...> |> Oban.Met.Sketch.insert(2)
+      ...> Oban.Met.Sketch.new([2])
       ...> |> Oban.Met.Sketch.merge(sketch_1)
       ...> |> Oban.Met.Sketch.size()
       2
@@ -64,14 +62,14 @@ defmodule Oban.Met.Sketch do
   ## Examples
 
       iex> Oban.Met.Sketch.new()
-      ...> |> Oban.Met.Sketch.insert(1)
-      ...> |> Oban.Met.Sketch.insert(2)
-      ...> |> Oban.Met.Sketch.insert(3)
+      ...> |> Oban.Met.Sketch.add(1)
+      ...> |> Oban.Met.Sketch.add(2)
+      ...> |> Oban.Met.Sketch.add(3)
       ...> |> Oban.Met.Sketch.size()
       3
   """
-  @spec insert(t(), pos_integer()) :: t()
-  def insert(%Sketch{} = sketch, value) when is_integer(value) and value > 0 do
+  @spec add(t(), pos_integer()) :: t()
+  def add(%Sketch{} = sketch, value) when is_integer(value) and value > 0 do
     bin = ceil(:math.log(value) * @inv_log_gamma)
     data = Map.update(sketch.data, bin, 1, &(&1 + 1))
 
@@ -91,9 +89,9 @@ defmodule Oban.Met.Sketch do
   With recorded values:
 
       iex> Oban.Met.Sketch.new()
-      ...> |> Oban.Met.Sketch.insert(1)
-      ...> |> Oban.Met.Sketch.insert(2)
-      ...> |> Oban.Met.Sketch.insert(3)
+      ...> |> Oban.Met.Sketch.add(1)
+      ...> |> Oban.Met.Sketch.add(2)
+      ...> |> Oban.Met.Sketch.add(3)
       ...> |> Oban.Met.Sketch.quantile(0.5)
       ...> |> trunc()
       2
@@ -124,9 +122,9 @@ defmodule Oban.Met.Sketch do
   ## Examples
 
       iex> Oban.Met.Sketch.new()
-      ...> |> Oban.Met.Sketch.insert(1)
-      ...> |> Oban.Met.Sketch.insert(2)
-      ...> |> Oban.Met.Sketch.insert(3)
+      ...> |> Oban.Met.Sketch.add(1)
+      ...> |> Oban.Met.Sketch.add(2)
+      ...> |> Oban.Met.Sketch.add(3)
       ...> |> Oban.Met.Sketch.to_list()
       ...> |> length()
       3
@@ -145,9 +143,7 @@ defmodule Oban.Met.Sketch do
 
   ## Examples
 
-      iex> Oban.Met.Sketch.new()
-      ...> |> Oban.Met.Sketch.insert(1)
-      ...> |> Oban.Met.Sketch.insert(2)
+      iex> Oban.Met.Sketch.new([1, 2])
       ...> |> Jason.encode!()
       ...> |> Jason.decode!()
       ...> |> Oban.Met.Sketch.from_map()

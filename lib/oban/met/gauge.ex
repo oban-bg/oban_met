@@ -38,10 +38,20 @@ defmodule Oban.Met.Gauge do
       ...> |> Oban.Met.Gauge.add(1)
       ...> |> Oban.Met.Gauge.first()
       3
+
+  Our gauge is specially tailored for tracking database counts, which may never be negative.
+
+      iex> Oban.Met.Gauge.new([1])
+      ...> |> Oban.Met.Gauge.add(-1)
+      ...> |> Oban.Met.Gauge.add(-1)
+      ...> |> Oban.Met.Gauge.first()
+      0
   """
-  @spec add(t(), non_neg_integer()) :: t()
+  @spec add(t(), integer()) :: t()
   def add(%Gauge{data: [latest | rest]} = gauge, value) do
-    %Gauge{gauge | data: [latest + value | rest]}
+    updated = max(0, latest + value)
+
+    %Gauge{gauge | data: [updated | rest]}
   end
 
   @doc """
@@ -86,8 +96,8 @@ defmodule Oban.Met.Gauge do
       1
   """
   @spec merge(t(), t()) :: t()
-  def merge(%Gauge{data: [latest | rest]}, %Gauge{data: data}) do
-    %Gauge{data: [latest | rest ++ data]}
+  def merge(%Gauge{data: data_1}, %Gauge{data: data_2}) do
+    %Gauge{data: data_1 ++ data_2}
   end
 
   @doc """
@@ -122,6 +132,22 @@ defmodule Oban.Met.Gauge do
     |> Enum.at(index)
   end
 
+  @doc false
   @spec size(t()) :: non_neg_integer()
   def size(%Gauge{data: data}), do: length(data)
+
+  @doc """
+  Initialize a gauge struct from a stringified map, e.g. encoded JSON.
+
+  ## Examples
+
+      iex> Oban.Met.Gauge.new([1, 2])
+      ...> |> Jason.encode!()
+      ...> |> Jason.decode!()
+      ...> |> Oban.Met.Gauge.from_map()
+      ...> |> Oban.Met.Gauge.size()
+      2
+  """
+  @spec from_map(%{optional(String.t()) => term()}) :: t()
+  def from_map(%{"data" => data}), do: %Gauge{data: data}
 end

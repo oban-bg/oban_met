@@ -2,7 +2,7 @@ defmodule Oban.Met.RecorderTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Oban.Met.{Recorder, Sketch}
+  alias Oban.Met.{Gauge, Recorder, Sketch, Value}
 
   @name ObanRecorder
   @node "worker.1"
@@ -31,7 +31,11 @@ defmodule Oban.Met.RecorderTest do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
     test "fetching metrics stored with pubsub notifications", %{pid: pid} do
-      metrics = [%{series: :exec, node: @node, queue: :default, type: :gauge, value: 1}]
+      metrics = [
+        %{series: :a, node: @node, queue: :default, type: :gauge, value: Gauge.new([1])},
+        %{series: :b, node: @node, queue: :default, type: :sketch, value: Sketch.new([1])},
+        %{series: :c, node: @node, queue: :default, type: :delta, value: 1}
+      ]
 
       payload =
         %{node: @node, metrics: metrics}
@@ -44,7 +48,8 @@ defmodule Oban.Met.RecorderTest do
 
       Process.sleep(10)
 
-      assert [{{"exec", labels, ^ts}, ^ts, :gauge, 1}] = Recorder.lookup(@name, :exec)
+      assert [{{"a", labels, ^ts}, ^ts, :gauge, _}] = Recorder.lookup(@name, :a)
+      assert [{{"b", _label, ^ts}, ^ts, :sketch, _}] = Recorder.lookup(@name, :b)
       assert %{"node" => @node, "queue" => "default"} = labels
     end
   end
@@ -53,19 +58,19 @@ defmodule Oban.Met.RecorderTest do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
     test "fetching the latest value for stored gauges" do
-      store(:available, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts())
       store(:available, :gauge, 2, %{"queue" => "gamma"}, timestamp: ts())
-      store(:available, :gauge, 3, %{"queue" => "alpha"}, timestamp: ts(-1))
-      store(:available, :gauge, 3, %{"queue" => "gamma"}, timestamp: ts(-1))
+      store(:available, :gauge, 2, %{"queue" => "alpha"}, timestamp: ts())
+      store(:available, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts(-1))
+      store(:available, :gauge, 3, %{"queue" => "gamma"}, timestamp: ts(-2))
 
-      assert %{"all" => 3} = latest(:available)
+      assert %{"all" => 4} = latest(:available)
     end
 
     test "fetching the latest value for stored sketches" do
-      store(:exec_time, :sketch, sketch([1, 2]), %{"queue" => "alpha"}, timestamp: ts())
-      store(:exec_time, :sketch, sketch([2, 3]), %{"queue" => "gamma"}, timestamp: ts())
-      store(:exec_time, :sketch, sketch([3, 4]), %{"queue" => "alpha"}, timestamp: ts(-1))
-      store(:exec_time, :sketch, sketch([3, 4]), %{"queue" => "gamma"}, timestamp: ts(-1))
+      store(:exec_time, :sketch, [1, 2], %{"queue" => "alpha"}, timestamp: ts())
+      store(:exec_time, :sketch, [2, 3], %{"queue" => "gamma"}, timestamp: ts())
+      store(:exec_time, :sketch, [3, 4], %{"queue" => "alpha"}, timestamp: ts(-1))
+      store(:exec_time, :sketch, [3, 4], %{"queue" => "gamma"}, timestamp: ts(-1))
 
       assert %{"all" => ntile} = latest(:exec_time)
 
@@ -83,15 +88,15 @@ defmodule Oban.Met.RecorderTest do
     end
 
     test "filtering the latest values by a label" do
-      store(:executing, :gauge, 4, %{"node" => "web.1", "queue" => "alpha"})
-      store(:executing, :gauge, 3, %{"node" => "web.2", "queue" => "gamma"})
-      store(:executing, :gauge, 2, %{"node" => "web.2", "queue" => "alpha"})
+      store(:exec, :gauge, 4, %{"node" => "web.1", "queue" => "alpha"})
+      store(:exec, :gauge, 3, %{"node" => "web.2", "queue" => "gamma"})
+      store(:exec, :gauge, 2, %{"node" => "web.2", "queue" => "alpha"})
 
-      assert %{"all" => 4} == latest(:executing, filters: [node: "web.1"])
-      assert %{"all" => 5} == latest(:executing, filters: [node: ["web.2"]])
-      assert %{"all" => 9} == latest(:executing, filters: [node: ["web.1", "web.2"]])
-      assert %{"all" => 4} == latest(:executing, filters: [node: ["web.1"], queue: ["alpha"]])
-      assert %{} == latest(:executing, filters: [node: ["web.1"], queue: ["gamma"]])
+      assert %{"all" => 4} == latest(:exec, filters: [node: "web.1"])
+      assert %{"all" => 5} == latest(:exec, filters: [node: ["web.2"]])
+      assert %{"all" => 9} == latest(:exec, filters: [node: ["web.1", "web.2"]])
+      assert %{"all" => 4} == latest(:exec, filters: [node: ["web.1"], queue: ["alpha"]])
+      assert %{} == latest(:exec, filters: [node: ["web.1"], queue: ["gamma"]])
     end
   end
 
@@ -109,7 +114,7 @@ defmodule Oban.Met.RecorderTest do
       assert [{ts, value, label} | _] = timeslice(:executing)
 
       assert is_integer(ts)
-      assert is_float(value)
+      assert is_integer(value)
       refute label
 
       assert [5, 1, 1, 4, 1, 1] = timeslice_values(:executing)
@@ -150,7 +155,7 @@ defmodule Oban.Met.RecorderTest do
 
         assert length(originals) ==
                  compacted
-                 |> Enum.map(fn {_, _, _, sketch} -> Sketch.size(sketch) end)
+                 |> Enum.map(fn {_, _, _, value} -> Value.size(value) end)
                  |> Enum.sum()
 
         get_queues = fn metrics ->
@@ -174,16 +179,14 @@ defmodule Oban.Met.RecorderTest do
       compact([{10, 30}])
 
       assert [9, 9, 9] =
-        :a
-        |> lookup()
-        |> Enum.map(fn {{_key, _lab, max_ts}, min_ts, _, _} -> max_ts - min_ts end)
+               :a
+               |> lookup()
+               |> Enum.map(fn {{_key, _lab, max_ts}, min_ts, _, _} -> max_ts - min_ts end)
     end
 
     test "sketches within periods of time are compacted by interval" do
-      sketch = Sketch.new([1, 2, 3])
-
       for offset <- [1, 4, 5, 6, 7] do
-        store(:a, :sketch, sketch, %{queue: :alpha}, timestamp: ts(-offset))
+        store(:a, :sketch, [1, 2, 3], %{queue: :alpha}, timestamp: ts(-offset))
       end
 
       compact([{5, 60}])
@@ -221,14 +224,19 @@ defmodule Oban.Met.RecorderTest do
                |> Enum.map(&get_in(&1, [Access.elem(0), Access.elem(1), :queue]))
     end
 
-    test "compacted gauges return the rounded maximum quantile" do
-      store(:a, :gauge, 1, %{queue: :alpha}, timestamp: ts(-1))
-      store(:a, :gauge, 1, %{queue: :alpha}, timestamp: ts(-2))
-      store(:a, :gauge, 1, %{queue: :alpha}, timestamp: ts(-3))
+    test "applying a delta after gauge compaction" do
+      store(:a, :gauge, 4, %{queue: :alpha}, timestamp: ts(-1))
+      store(:a, :gauge, 3, %{queue: :alpha}, timestamp: ts(-2))
+      store(:a, :gauge, 2, %{queue: :alpha}, timestamp: ts(-3))
 
       compact([{5, 60}])
 
-      assert %{"all" => 1} = latest(:a)
+      assert %{"all" => 4} = latest(:a)
+
+      store(:a, :delta, 1, %{queue: :alpha})
+      store(:a, :delta, 1, %{queue: :alpha})
+
+      assert %{"all" => 6} = latest(:a)
     end
   end
 
@@ -243,13 +251,27 @@ defmodule Oban.Met.RecorderTest do
       store(:a, :gauge, 2, %{queue: :alpha}, timestamp: ts(-6))
       store(:a, :gauge, 1, %{queue: :alpha}, timestamp: ts(-7))
 
+      store(:b, :sketch, [4, 3], %{queue: :alpha}, timestamp: ts(-3))
+      store(:b, :sketch, [3, 2], %{queue: :alpha}, timestamp: ts(-4))
+      store(:b, :sketch, [2, 1], %{queue: :alpha}, timestamp: ts(-6))
+
       assert length(lookup(:a)) == 4
+      assert length(lookup(:b)) == 3
 
       send(pid, :compact)
 
       Process.sleep(5)
 
       assert length(lookup(:a)) == 2
+      assert length(lookup(:b)) == 2
+
+      assert %{"all" => 4} = latest(:a)
+
+      assert 4 ==
+               :b
+               |> latest()
+               |> Map.fetch!("all")
+               |> round()
     end
   end
 
@@ -273,6 +295,13 @@ defmodule Oban.Met.RecorderTest do
   end
 
   defp store(series, type, value, labels, opts \\ []) do
+    value =
+      case type do
+        :gauge -> Gauge.new(value)
+        :sketch -> Sketch.new(value)
+        :delta -> value
+      end
+
     Recorder.store(@name, series, type, value, labels, opts)
   end
 
@@ -290,10 +319,6 @@ defmodule Oban.Met.RecorderTest do
 
   defp timeslice_values(series, opts \\ []) do
     for {_, value, _} <- timeslice(series, opts), do: round(value)
-  end
-
-  defp sketch(values) do
-    Enum.reduce(values, Sketch.new(), &Sketch.insert(&2, &1))
   end
 
   defp ts(offset \\ 0) do

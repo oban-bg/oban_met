@@ -6,13 +6,13 @@ defmodule Oban.Met.Recorder do
   use GenServer
 
   alias __MODULE__, as: State
-  alias Oban.Met.Sketch
+  alias Oban.Met.{Gauge, Sketch, Value}
   alias Oban.Notifier
 
   @type name_or_table :: GenServer.name() | :ets.t()
   @type series :: atom() | String.t()
-  @type value :: integer() | Sketch.t()
-  @type label :: String.t() | nil
+  @type value :: Value.t()
+  @type label :: String.t()
   @type labels :: %{optional(String.t()) => label()}
   @type ts :: integer()
   @type period :: {pos_integer(), pos_integer()}
@@ -80,9 +80,8 @@ defmodule Oban.Met.Recorder do
           :gauge ->
             metrics
             |> get_in([Access.all(), Access.elem(3)])
-            |> Enum.map(&Sketch.quantile(&1, 1.0))
+            |> Enum.map(&Value.quantile(&1, 1.0))
             |> Enum.sum()
-            |> round()
 
           :sketch ->
             metrics
@@ -110,7 +109,7 @@ defmodule Oban.Met.Recorder do
 
     table
     |> :ets.select_reverse([{match, [guard], [:"$_"]}])
-    |> Enum.map(fn {{_, labels, ts}, _, _, value} -> {ts, to_sketch(value), labels[label]} end)
+    |> Enum.map(fn {{_, labels, ts}, _, _, value} -> {ts, value, labels[label]} end)
     |> Enum.sort_by(fn {ts, _, label} -> {label, ts} end)
     |> Enum.chunk_by(fn {ts, _, label} -> {label, div(systm - ts - 1, slice)} end)
     |> Enum.map(&merge_metrics(&1, ntile))
@@ -121,18 +120,23 @@ defmodule Oban.Met.Recorder do
 
   def store(table, series, type, value, labels, opts)
       when is_reference(table) and type in [:gauge, :delta, :sketch] do
-    series = to_string(series)
     ts = Keyword.get(opts, :timestamp, System.system_time(:second))
+
+    series = to_string(series)
 
     case {type, get_latest(table, series, labels)} do
       {_type, {{^series, ^labels, ^ts} = key, ^ts, ^type, old_value}} ->
-        :ets.insert(table, {key, ts, type, merge(old_value, value)})
+        :ets.insert(table, {key, ts, type, Value.merge(old_value, value)})
 
       {:delta, {{^series, ^labels, _max_ts}, _min_ts, :gauge, old_value}} ->
-        :ets.insert(table, {{series, labels, ts}, ts, :gauge, merge(old_value, value)})
+        :ets.insert(table, {{series, labels, ts}, ts, :gauge, Value.add(old_value, value)})
 
       {:delta, nil} ->
-        :ets.insert(table, {{series, labels, ts}, ts, :gauge, value})
+        # NOTE: This shouldn't happen, raise or ignore
+        :ets.insert(table, {{series, labels, ts}, ts, :gauge, Gauge.new(value)})
+
+      {:gauge, _object} ->
+        :ets.insert(table, {{series, labels, ts}, ts, type, value})
 
       {_type, _object} ->
         :ets.insert(table, {{series, labels, ts}, ts, type, value})
@@ -153,10 +157,6 @@ defmodule Oban.Met.Recorder do
       _ -> nil
     end
   end
-
-  defp merge(%Sketch{} = old, %Sketch{} = new), do: Sketch.merge(old, new)
-  defp merge(%Sketch{} = old, new), do: Sketch.insert(old, new)
-  defp merge(old, new), do: max(0, old + new)
 
   @doc false
   @spec compact(name_or_table(), [period()]) :: any()
@@ -193,11 +193,9 @@ defmodule Oban.Met.Recorder do
       |> Enum.min_max()
 
     value =
-      Enum.reduce(metrics, Sketch.new(), fn {_key, _min, _type, value}, acc ->
-        value
-        |> to_sketch()
-        |> Sketch.merge(acc)
-      end)
+      metrics
+      |> Enum.map(&elem(&1, 3))
+      |> Enum.reduce(&Value.merge/2)
 
     {{series, labels, max_ts}, min_ts, type, value}
   end
@@ -239,9 +237,15 @@ defmodule Oban.Met.Recorder do
   @impl GenServer
   def handle_info({:notification, :gossip, %{"metrics" => metrics}}, %State{} = state) do
     for %{"series" => series, "type" => type, "value" => value} = labels <- metrics do
-      type = String.to_existing_atom(type)
       labels = Map.drop(labels, ["name", "type", "value"])
-      value = if match?(%{"data" => _}, value), do: Sketch.from_map(value), else: value
+      type = String.to_existing_atom(type)
+
+      value =
+        case type do
+          :gauge -> Gauge.from_map(value)
+          :sketch -> Sketch.from_map(value)
+          _ -> value
+        end
 
       store(state.table, series, type, value, labels)
     end
@@ -304,7 +308,7 @@ defmodule Oban.Met.Recorder do
 
   defp merge_metrics(metrics, ntile) do
     metrics
-    |> Enum.reduce(fn {_, new, _}, {ts, acc, label} -> {ts, merge(new, acc), label} end)
-    |> update_in([Access.elem(1)], &Sketch.quantile(&1, ntile))
+    |> Enum.reduce(fn {_, new, _}, {ts, acc, label} -> {ts, Value.merge(new, acc), label} end)
+    |> update_in([Access.elem(1)], &Value.quantile(&1, ntile))
   end
 end
