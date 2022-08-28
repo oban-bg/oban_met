@@ -1,7 +1,19 @@
 defmodule Oban.Met.Test do
-  use ExUnit.Case, async: true
+  use Oban.Met.Case, async: false
 
-  describe "initializing storage" do
+  describe "initializing storage with :auto_mode enabled" do
+    setup do
+      Application.stop(:oban_met)
+      Application.put_env(:oban_met, :auto_mode, true)
+      Application.ensure_started(:oban_met)
+
+      on_exit(fn ->
+        Application.stop(:oban_met)
+        Application.put_env(:oban_met, :auto_mode, false)
+        Application.ensure_started(:oban_met)
+      end)
+    end
+
     test "starting storage servers for oban instances on :init" do
       start_supervised!(
         {Oban, [notifier: Oban.Notifiers.PG, repo: Oban.Met.Repo, testing: :inline]}
@@ -12,25 +24,5 @@ defmodule Oban.Met.Test do
         assert active >= 1
       end)
     end
-  end
-
-  defp with_backoff(opts \\ [], fun) do
-    total = Keyword.get(opts, :total, 100)
-    sleep = Keyword.get(opts, :sleep, 1)
-
-    with_backoff(fun, 0, total, sleep)
-  end
-
-  defp with_backoff(fun, count, total, sleep) do
-    fun.()
-  rescue
-    exception in [ExUnit.AssertionError] ->
-      if count < total do
-        Process.sleep(sleep)
-
-        with_backoff(fun, count + 1, total, sleep)
-      else
-        reraise(exception, __STACKTRACE__)
-      end
   end
 end

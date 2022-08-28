@@ -18,4 +18,24 @@ defmodule Oban.Met.Case do
 
     :ok
   end
+
+  def with_backoff(opts \\ [], fun) do
+    total = Keyword.get(opts, :total, 100)
+    sleep = Keyword.get(opts, :sleep, 1)
+
+    with_backoff(fun, 0, total, sleep)
+  end
+
+  def with_backoff(fun, count, total, sleep) do
+    fun.()
+  rescue
+    exception in [ExUnit.AssertionError] ->
+      if count < total do
+        Process.sleep(sleep)
+
+        with_backoff(fun, count + 1, total, sleep)
+      else
+        reraise(exception, __STACKTRACE__)
+      end
+  end
 end

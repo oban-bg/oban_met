@@ -8,7 +8,9 @@ defmodule Oban.Met.Application do
 
   @impl Application
   def start(_type, _args) do
-    :telemetry.attach(@handler_id, [:oban, :supervisor, :init], &__MODULE__.init_metrics/4, [])
+    if Application.get_env(:oban_met, :auto_mode) do
+      :telemetry.attach(@handler_id, [:oban, :supervisor, :init], &__MODULE__.init_metrics/4, [])
+    end
 
     Supervisor.start_link([], strategy: :one_for_one, name: @supervisor)
   end

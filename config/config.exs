@@ -1,5 +1,7 @@
 import Config
 
+config :oban_met, auto_mode: false
+
 config :oban_met, ecto_repos: [Oban.Pro.Repo]
 
 config :oban_met, Oban.Met.Repo,
