@@ -22,10 +22,20 @@ defmodule Oban.Met.Gauge do
       iex> Oban.Met.Gauge.new([0, 1, 2])
       ...> |> Oban.Met.Gauge.size()
       3
+
+      iex> Oban.Met.Gauge.new([-1])
+      ...> |> Oban.Met.Gauge.first()
+      0
   """
   @spec new(non_neg_integer() | [non_neg_integer()]) :: t()
-  def new(data) when is_integer(data) and data >= 0, do: new([data])
-  def new(data) when is_list(data), do: %Gauge{data: data}
+  def new(data) when is_integer(data) or is_list(data) do
+    data =
+      data
+      |> List.wrap()
+      |> Enum.map(&max(0, &1))
+
+    %Gauge{data: List.wrap(data)}
+  end
 
   @doc """
   Add to the latest value for a gauge.

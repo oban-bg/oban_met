@@ -8,8 +8,8 @@ defmodule Oban.Met.Reporter do
   import Ecto.Query, only: [group_by: 3, select: 3]
 
   alias __MODULE__, as: State
-  alias Oban.Met.Sketch
-  alias Oban.{Job, Notifier, Peer, Repo}
+  alias Oban.Met.{Gauge, Sketch}
+  alias Oban.{Job, Notifier, Repo}
 
   defstruct [
     :checkpoint_timer,
@@ -91,7 +91,7 @@ defmodule Oban.Met.Reporter do
       |> select([j], {j.queue, j.state, count(j.id)})
 
     for {queue, state, count} <- Repo.all(conf, query, timeout: :infinity) do
-      :ets.insert(table, {%{series: state, type: :gauge, queue: queue}, count})
+      :ets.insert(table, {%{series: state, type: :gauge, queue: queue}, Gauge.new(count)})
     end
 
     {:noreply, schedule_checkpoint(state)}
@@ -204,7 +204,7 @@ defmodule Oban.Met.Reporter do
         :ets.insert(table, {key, old + val})
 
       [{%{type: :sketch}, old}] ->
-        :ets.insert(table, {key, Sketch.insert(old, val)})
+        :ets.insert(table, {key, Sketch.add(old, val)})
 
       [] ->
         case key do
@@ -212,7 +212,7 @@ defmodule Oban.Met.Reporter do
             :ets.insert(table, {key, val})
 
           %{type: :sketch} ->
-            :ets.insert(table, {key, Sketch.insert(Sketch.new(), val)})
+            :ets.insert(table, {key, Sketch.new([val])})
         end
     end
   end

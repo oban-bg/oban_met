@@ -63,15 +63,17 @@ defmodule Oban.Met.Recorder do
   def latest(name, series, opts \\ []) do
     {:ok, table} = Registry.meta(Oban.Registry, name)
 
-    since = Keyword.get(opts, :lookback, 5)
-    group = Keyword.get(opts, :group, nil)
-    ntile = Keyword.get(opts, :ntile, 1.0)
+    opts = Keyword.validate!(opts, [group: nil, ntile: 1.0, lookback: 5])
+
+    since = Keyword.fetch!(opts, :lookback)
+    group = Keyword.fetch!(opts, :group)
+    ntile = Keyword.fetch!(opts, :ntile)
+    systm = System.system_time(:second)
     match = {{to_string(series), :"$1", :"$2"}, :_, :_, :_}
-    guard = filters_to_guards(opts[:filters], {:>=, :"$2", since})
+    guard = filters_to_guards(opts[:filters], {:>=, :"$2", systm - since})
 
     table
     |> :ets.select_reverse([{match, [guard], [:"$_"]}])
-    |> Enum.map(fn metric -> update_in(metric, [Access.elem(3)], &to_sketch/1) end)
     |> Enum.dedup_by(fn {{_, labels, _}, _, _, _} -> labels end)
     |> Enum.group_by(fn {{_, labels, _}, _, _, _} -> labels[group] end)
     |> Map.new(fn {group, [{_, _, type, _} | _] = metrics} ->
@@ -98,14 +100,16 @@ defmodule Oban.Met.Recorder do
   def timeslice(name, series, opts \\ []) do
     {:ok, table} = Registry.meta(Oban.Registry, name)
 
-    label = Keyword.get(opts, :label, :any)
-    ntile = Keyword.get(opts, :ntile, 1.0)
-    since = Keyword.get(opts, :lookback, 5)
-    slice = Keyword.get(opts, :by, 1)
+    opts = Keyword.validate!(opts, [label: :any, ntile: 1.0, lookback: 5, by: 1])
+
+    label = Keyword.fetch!(opts, :label)
+    ntile = Keyword.fetch!(opts, :ntile)
+    since = Keyword.fetch!(opts, :lookback)
+    slice = Keyword.fetch!(opts, :by)
     systm = System.system_time(:second)
 
     match = {{to_string(series), :"$1", :"$2"}, :_, :_, :_}
-    guard = filters_to_guards(opts[:filters], {:>=, :"$2", since})
+    guard = filters_to_guards(opts[:filters], {:>=, :"$2", systm - since})
 
     table
     |> :ets.select_reverse([{match, [guard], [:"$_"]}])
@@ -132,7 +136,6 @@ defmodule Oban.Met.Recorder do
         :ets.insert(table, {{series, labels, ts}, ts, :gauge, Value.add(old_value, value)})
 
       {:delta, nil} ->
-        # NOTE: This shouldn't happen, raise or ignore
         :ets.insert(table, {{series, labels, ts}, ts, :gauge, Gauge.new(value)})
 
       {:gauge, _object} ->
@@ -172,7 +175,7 @@ defmodule Oban.Met.Recorder do
       _delete = :ets.select_delete(table, [{match, guard, [true]}])
 
       objects
-      |> Enum.chunk_by(fn {{_, _, max_ts}, _, _, _} -> div(ts - max_ts - 1, step) end)
+      |> Enum.chunk_by(fn {{ser, lab, max}, _, _, _} -> {ser, lab, div(ts - max - 1, step)} end)
       |> Enum.map(&compact/1)
       |> then(&:ets.insert(table, &1))
 

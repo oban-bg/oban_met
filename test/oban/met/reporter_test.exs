@@ -4,7 +4,7 @@ defmodule Oban.Met.ReporterTest do
   import :telemetry, only: [execute: 3]
 
   alias Oban.{Job, Notifier}
-  alias Oban.Met.{Repo, Reporter, Sketch}
+  alias Oban.Met.{Gauge, Repo, Reporter, Sketch}
 
   @opts [
     node: "worker.1",
@@ -38,7 +38,7 @@ defmodule Oban.Met.ReporterTest do
       assert length(metrics) == length(states) * length(queues)
 
       assert [:gauge] = for({%{type: type}, _} <- metrics, uniq: true, do: type)
-      assert [1] = for({_, value} <- metrics, uniq: true, do: value)
+      assert [%Gauge{}] = for({_, value} <- metrics, uniq: true, do: value)
     end
   end
 
