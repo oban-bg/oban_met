@@ -8,9 +8,7 @@ defmodule Oban.Met.Application do
 
   @impl Application
   def start(_type, _args) do
-    if Application.get_env(:oban_met, :auto_mode) do
-      :telemetry.attach(@handler_id, [:oban, :supervisor, :init], &__MODULE__.init_metrics/4, [])
-    end
+    :telemetry.attach(@handler_id, [:oban, :supervisor, :init], &__MODULE__.init_metrics/4, [])
 
     Supervisor.start_link([], strategy: :one_for_one, name: @supervisor)
   end
@@ -24,6 +22,8 @@ defmodule Oban.Met.Application do
 
   @doc false
   def init_metrics(_event, _measure, %{conf: conf}, _conf) do
-    Supervisor.start_child(@supervisor, {Oban.Met.Supervisor, conf: conf})
+    if Application.get_env(:oban_met, :auto_mode) and conf.testing == :disabled do
+      Supervisor.start_child(@supervisor, {Oban.Met.Supervisor, conf: conf})
+    end
   end
 end
