@@ -116,7 +116,7 @@ defmodule Oban.Met.Recorder do
     |> Enum.map(fn {{_, labels, ts}, _, _, value} -> {ts, value, labels[label]} end)
     |> Enum.sort_by(fn {ts, _, label} -> {label, ts} end)
     |> Enum.chunk_by(fn {ts, _, label} -> {label, div(systm - ts - 1, slice)} end)
-    |> Enum.map(&merge_metrics(&1, ntile))
+    |> Enum.map(&merge_into_ntile(&1, ntile))
   end
 
   @doc false
@@ -306,10 +306,7 @@ defmodule Oban.Met.Recorder do
     end)
   end
 
-  defp to_sketch(int) when is_integer(int), do: Sketch.new([int])
-  defp to_sketch(sketch), do: sketch
-
-  defp merge_metrics(metrics, ntile) do
+  defp merge_into_ntile(metrics, ntile) do
     metrics
     |> Enum.reduce(fn {_, new, _}, {ts, acc, label} -> {ts, Value.merge(new, acc), label} end)
     |> update_in([Access.elem(1)], &Value.quantile(&1, ntile))

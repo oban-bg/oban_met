@@ -1,7 +1,10 @@
 defmodule Oban.Met do
   @moduledoc """
-  Documentation for `Oban.Met`.
+  Metric introspection for Oban.
   """
+
+  alias Oban.Met.{Examiner, Recorder}
+  alias Oban.Registry
 
   @type oban_name :: term()
 
@@ -24,75 +27,38 @@ defmodule Oban.Met do
           | {:agg, :min | :max | :p50 | :p95 | :p99}
           | {:res, :seconds | :minutes | :hours | :days}
 
+  @type name_or_table :: GenServer.name() | :ets.t()
+  @type series :: atom() | String.t()
+  @type value :: Value.t()
+  @type label :: String.t()
+  @type ts :: integer()
+
+  def all_checks(oban \\ Oban) do
+    oban
+    |> Registry.via(Examiner)
+    |> Examiner.all_checks()
+  end
+
   @doc """
-  Get a summary of the current counts for a particular field, optionally subdivided by another
-  field.
+  Get the latest values for a series, optionally subdivided by a label.
 
   Unlike queues and workers, states are static and constant, so they'll always show up in the
   counts or subdivision maps.
-
-  ## Examples
-
-  Retrieve counts using the default `by: :state`:
-
-      Met.counts()
-      # => %{"available" => 10, "cancelled" => 0, "completed" => 15, ...
-
-  By state, without any subdivision, explicitly:
-
-      Met.counts(by: :state, sub: false)
-      # => %{"available" => 10, "cancelled" => 0, "completed" => 15, ...
-
-  By state, subdivided by queue:
-
-      Met.counts(by: :state, sub: :queue)
-      # => %{"available" => %{"alpha" => 9, "gamma" => 1}, "cancelled" => %{}, ...
-
-  By queue, subdivided by state:
-
-      Met.counts(by: :queue, sub: :state)
-      # => %{"alpha" => %{"available" => 10, "cancelled" => 0, "completed" => 15, ...
-
-  By queue, subdivided by worker:
-
-      Met.counts(by: :state, sub: :worker)
-      # => %{"alpha" => %{"WorkerA" => 5, "WorkerB" => 5}, "gamma" => %{}, ...
   """
-  @spec counts(oban_name(), count_opts() | filter_opts()) :: counts() | sub_counts()
-  def counts(oban \\ Oban, opts \\ []) do
-    # validate the opts using Keyword.validate
-    # lookup the associated stats table
-    # select out the values that we need based on opts
-    # do the aggregation at this point using the values
-    #   - this central aggregation is the pure bit we want to test
-    #   - do we test at the top level, and keep the storage opaque?
+  @spec latest(oban_name(), count_opts() | filter_opts()) :: counts() | sub_counts()
+  def latest(oban \\ Oban, series, opts \\ []) do
+    oban
+    |> Registry.via(Recorder)
+    |> Recorder.latest(series, opts)
   end
 
   @doc """
   Summarize a series of data with an aggregate over a configurable window of time.
-
-  Generate series data using the defaults of `series: :state, agg: :max, res: :seconds`:
-
-      Met.window()
-      # => [%{at: %DateTime{}, label: "available", value: 9}, %{at: %DateTime{}, label: "completed", value: 3}]
-
-  Summarize by state, with a minimum aggregate and by minute:
-
-      Met.window(series: :state, agg: :min, res: :minutes)
-      # => [%{at: %DateTime{}, label: "available", value: 9}, %{at: %DateTime{}, label: "cancelled", value: 7}]
-
-  Summarize by queue, using the median and an hourly resolution:
-
-      Met.window(series: :queue, agg: :p50, res: :hours)
-      # => [%{at: %DateTime{}, label: "alpha", value: 4}, %{at: %DateTime{}, label: "gamma", value: 7}}]
-
-  Summarize by execution time, using the 95th percentile and only for a couple of workers:
-
-      Met.window(series: :ellapsed, agg: :p95, workers: ["WorkerA", "WorkerB"])
-      # => [%{at: %DateTime{}, label: "", value: 100}, %{at: %DateTime{}, label: "", value: 100}]
   """
-  @spec window(oban_name, summary_opts() | filter_opts()) :: [%{at: DateTime.t(), data: counts()}]
-  def window(oban \\ Oban, opts \\ []) do
-    []
+  @spec timeslice(oban_name, summary_opts() | filter_opts()) :: [{ts(), value(), label()}]
+  def timeslice(oban \\ Oban, series, opts \\ []) do
+    oban
+    |> Registry.via(Recorder)
+    |> Recorder.timeslice(series, opts)
   end
 end

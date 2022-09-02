@@ -4,7 +4,7 @@ defmodule Oban.Met.Supervisor do
   use Supervisor
 
   alias Oban.Registry
-  alias Oban.Met.{Recorder, Reporter}
+  alias Oban.Met.{Examiner, Recorder, Reporter}
 
   @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
   def child_spec(opts) do
@@ -27,12 +27,10 @@ defmodule Oban.Met.Supervisor do
   def init(opts) do
     conf = Keyword.fetch!(opts, :conf)
 
-    rec_name = Registry.via(conf.name, Recorder)
-    rep_name = Registry.via(conf.name, Reporter)
-
     children = [
-      {Recorder, conf: conf, name: rec_name},
-      {Reporter, conf: conf, name: rep_name}
+      {Examiner, conf: conf, name: Registry.via(conf.name, Examiner)},
+      {Recorder, conf: conf, name: Registry.via(conf.name, Recorder)},
+      {Reporter, conf: conf, name: Registry.via(conf.name, Reporter)}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

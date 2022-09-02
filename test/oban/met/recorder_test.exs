@@ -1,17 +1,11 @@
 defmodule Oban.Met.RecorderTest do
-  use ExUnit.Case, async: true
+  use Oban.Met.Case, async: true
   use ExUnitProperties
 
   alias Oban.Met.{Gauge, Recorder, Sketch, Value}
 
-  @name ObanRecorder
+  @name Oban.Recorder
   @node "worker.1"
-  @opts [
-    node: @node,
-    notifier: Oban.Notifiers.PG,
-    repo: Oban.Met.Repo,
-    testing: :inline
-  ]
 
   describe "store/5" do
     setup [:start_supervised_oban, :start_supervised_recorder]
@@ -54,8 +48,8 @@ defmodule Oban.Met.RecorderTest do
 
       Process.sleep(10)
 
-      assert [{{"a", labels, ^ts}, ^ts, :gauge, _}] = Recorder.lookup(@name, :a)
-      assert [{{"b", _label, ^ts}, ^ts, :sketch, _}] = Recorder.lookup(@name, :b)
+      assert [{{"a", labels, ^ts}, ^ts, :gauge, _}] = lookup(:a)
+      assert [{{"b", _label, ^ts}, ^ts, :sketch, _}] = lookup(:b)
       assert %{"node" => @node, "queue" => "default"} = labels
     end
   end
@@ -296,15 +290,6 @@ defmodule Oban.Met.RecorderTest do
                |> Map.fetch!("all")
                |> round()
     end
-  end
-
-  defp start_supervised_oban(_context) do
-    name = make_ref()
-    start_supervised!({Oban, Keyword.put(@opts, :name, name)})
-
-    conf = Oban.config(name)
-
-    {:ok, conf: conf}
   end
 
   defp start_supervised_recorder(%{conf: conf}) do

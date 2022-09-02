@@ -6,12 +6,6 @@ defmodule Oban.Met.ReporterTest do
   alias Oban.{Job, Notifier}
   alias Oban.Met.{Gauge, Repo, Reporter, Sketch}
 
-  @opts [
-    node: "worker.1",
-    notifier: Oban.Notifiers.PG,
-    repo: Oban.Met.Repo,
-    testing: :manual
-  ]
   @name Oban.Reporter
 
   describe "checkpoints" do
@@ -156,15 +150,6 @@ defmodule Oban.Met.ReporterTest do
       Enum.all?(fields, fn {key, val} -> Map.get(labels, key) == val end)
     end)
     |> elem(1)
-  end
-
-  defp start_supervised_oban(_context) do
-    name = make_ref()
-    start_supervised!({Oban, Keyword.put(@opts, :name, name)})
-
-    conf = Oban.config(name)
-
-    {:ok, conf: conf}
   end
 
   defp start_supervised_reporter(%{conf: conf}) do

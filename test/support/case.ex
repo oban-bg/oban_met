@@ -19,6 +19,27 @@ defmodule Oban.Met.Case do
     :ok
   end
 
+  def start_supervised_oban(context) do
+    oban_opts = Map.get(context, :oban_opts, [])
+
+    name = make_ref()
+
+    opts =
+      Keyword.merge(oban_opts,
+        name: name,
+        node: "worker.1",
+        notifier: Oban.Notifiers.PG,
+        repo: Oban.Met.Repo,
+        testing: :manual
+      )
+
+    start_supervised!({Oban, opts})
+
+    conf = Oban.config(name)
+
+    {:ok, conf: conf}
+  end
+
   def with_backoff(opts \\ [], fun) do
     total = Keyword.get(opts, :total, 100)
     sleep = Keyword.get(opts, :sleep, 1)
