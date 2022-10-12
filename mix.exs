@@ -26,7 +26,7 @@ defmodule Oban.Met.MixProject do
     [
       extra_applications: [:logger],
       mod: {Oban.Met.Application, []},
-      env: [auto_mode: true]
+      env: [auto_start: true, auto_testing_modes: [:disabled]]
     ]
   end
 

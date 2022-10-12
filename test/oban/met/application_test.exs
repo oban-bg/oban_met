@@ -3,9 +3,9 @@ defmodule Oban.Met.Test do
 
   describe "initializing storage with :auto_mode enabled" do
     test "starting storage servers for oban instances on :init" do
-      Application.put_env(:oban_met, :auto_mode, true)
+      Application.put_env(:oban_met, :auto_start, true)
 
-      on_exit(fn -> Application.put_env(:oban_met, :auto_mode, false) end)
+      on_exit(fn -> Application.put_env(:oban_met, :auto_start, false) end)
 
       start_supervised!(
         {Oban, [notifier: Oban.Notifiers.PG, repo: Oban.Met.Repo]}
