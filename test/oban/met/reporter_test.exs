@@ -99,6 +99,131 @@ defmodule Oban.Met.ReporterTest do
       assert %Sketch{size: 3} = find_metric(metrics, series: :exec_time)
       assert %Sketch{size: 3} = find_metric(metrics, series: :wait_time)
     end
+
+    @tag :engine_events
+    test "capturing single insertion counts", %{conf: conf, pid: pid} do
+      event = [:oban, :engine, :insert_job, :stop]
+
+      execute(event, %{}, %{conf: conf, job: %Job{queue: "alpha", state: "available"}})
+      execute(event, %{}, %{conf: conf, job: %Job{queue: "gamma", state: "available"}})
+      execute(event, %{}, %{conf: conf, job: %Job{queue: "gamma", state: "available"}})
+      execute(event, %{}, %{conf: conf, job: %Job{queue: "alpha", state: "scheduled"}})
+
+      metrics = Reporter.all_metrics(pid)
+
+      assert 1 == find_metric(metrics, series: :available, queue: "alpha")
+      assert 2 == find_metric(metrics, series: :available, queue: "gamma")
+      assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha")
+    end
+
+    @tag :engine_events
+    test "capturing bulk insertion counts", %{conf: conf, pid: pid} do
+      event = [:oban, :engine, :insert_all_jobs, :stop]
+
+      jobs = [
+        %Job{queue: "alpha", state: "available"},
+        %Job{queue: "alpha", state: "scheduled"},
+        %Job{queue: "gamma", state: "available"},
+        %Job{queue: "gamma", state: "available"}
+      ]
+
+      execute(event, %{}, %{conf: conf, jobs: jobs})
+
+      metrics = Reporter.all_metrics(pid)
+
+      assert 1 == find_metric(metrics, series: :available, queue: "alpha")
+      assert 2 == find_metric(metrics, series: :available, queue: "gamma")
+      assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha")
+    end
+
+    @tag :plugin_events
+    test "capturing pruned_job counts", %{conf: conf, pid: pid} do
+      insert_tracked(conf, [
+        %Job{queue: "alpha", state: "completed"},
+        %Job{queue: "alpha", state: "completed"},
+        %Job{queue: "alpha", state: "cancelled"},
+        %Job{queue: "alpha", state: "cancelled"},
+        %Job{queue: "alpha", state: "discarded"},
+        %Job{queue: "gamma", state: "completed"}
+      ])
+
+      jobs = [
+        %Job{queue: "alpha", state: "completed"},
+        %Job{queue: "alpha", state: "cancelled"},
+        %Job{queue: "alpha", state: "discarded"},
+        %Job{queue: "gamma", state: "completed"}
+      ]
+
+      execute([:oban, :plugin, :stop], %{}, %{conf: conf, pruned_jobs: jobs})
+
+      metrics = Reporter.all_metrics(pid)
+
+      assert 1 == find_metric(metrics, series: :completed, queue: "alpha")
+      assert 1 == find_metric(metrics, series: :cancelled, queue: "alpha")
+      assert 0 == find_metric(metrics, series: :discarded, queue: "alpha")
+      assert 0 == find_metric(metrics, series: :completed, queue: "gamma")
+    end
+
+    @tag :plugin_events
+    test "capturing staged_job counts", %{conf: conf, pid: pid} do
+      insert_tracked(conf, [
+        %Job{queue: "alpha", state: "scheduled"},
+        %Job{queue: "alpha", state: "scheduled"},
+        %Job{queue: "alpha", state: "retryable"},
+        %Job{queue: "gamma", state: "scheduled"}
+      ])
+
+      jobs = [
+        %Job{queue: "alpha", state: "scheduled"},
+        %Job{queue: "alpha", state: "retryable"},
+        %Job{queue: "gamma", state: "scheduled"}
+      ]
+
+      execute([:oban, :plugin, :stop], %{}, %{conf: conf, staged_jobs: jobs})
+
+      metrics = Reporter.all_metrics(pid)
+
+      assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha")
+      assert 0 == find_metric(metrics, series: :retryable, queue: "alpha")
+      assert 2 == find_metric(metrics, series: :available, queue: "alpha")
+
+      assert 0 == find_metric(metrics, series: :scheduled, queue: "gamma")
+      assert 1 == find_metric(metrics, series: :available, queue: "gamma")
+    end
+
+    @tag :plugin_events
+    test "capturing rescued and discarded counts", %{conf: conf, pid: pid} do
+      insert_tracked(conf, [
+        %Job{queue: "alpha", state: "executing"},
+        %Job{queue: "alpha", state: "executing"},
+        %Job{queue: "alpha", state: "executing"},
+        %Job{queue: "gamma", state: "executing"},
+        %Job{queue: "gamma", state: "executing"}
+      ])
+
+      rescued_jobs = [
+        %Job{queue: "alpha", state: "executing"},
+        %Job{queue: "gamma", state: "executing"}
+      ]
+
+      discarded_jobs = [
+        %Job{queue: "alpha", state: "executing"},
+        %Job{queue: "gamma", state: "executing"}
+      ]
+
+      meta = %{conf: conf, rescued_jobs: rescued_jobs, discarded_jobs: discarded_jobs}
+
+      execute([:oban, :plugin, :stop], %{}, meta)
+
+      metrics = Reporter.all_metrics(pid)
+
+      assert 1 == find_metric(metrics, series: :executing, queue: "alpha")
+      assert 1 == find_metric(metrics, series: :available, queue: "alpha")
+      assert 1 == find_metric(metrics, series: :discarded, queue: "alpha")
+      assert 0 == find_metric(metrics, series: :executing, queue: "gamma")
+      assert 1 == find_metric(metrics, series: :available, queue: "gamma")
+      assert 1 == find_metric(metrics, series: :discarded, queue: "gamma")
+    end
   end
 
   describe "reporting" do
@@ -144,12 +269,19 @@ defmodule Oban.Met.ReporterTest do
     end
   end
 
+  defp insert_tracked(conf, jobs) do
+    execute([:oban, :engine, :insert_all_jobs, :stop], %{}, %{conf: conf, jobs: jobs})
+  end
+
   defp find_metric(metrics, fields) do
-    metrics
-    |> Enum.find(fn {labels, _} ->
+    finder = fn {labels, _} ->
       Enum.all?(fields, fn {key, val} -> Map.get(labels, key) == val end)
-    end)
-    |> elem(1)
+    end
+
+    case Enum.find(metrics, finder) do
+      {_label, count} -> count
+      nil -> :error
+    end
   end
 
   defp start_supervised_reporter(%{conf: conf}) do

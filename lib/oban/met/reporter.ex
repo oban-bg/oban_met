@@ -132,8 +132,9 @@ defmodule Oban.Met.Reporter do
     [:oban, :job, :start],
     [:oban, :job, :stop],
     [:oban, :job, :exception],
+    [:oban, :plugin, :stop],
     [:oban, :engine, :insert_job, :stop],
-    [:oban, :engine, :insert_all_jobs, :stop],
+    [:oban, :engine, :insert_all_jobs, :stop]
   ]
 
   defp attach_events(%State{conf: conf, table: table} = state) do
@@ -179,20 +180,66 @@ defmodule Oban.Met.Reporter do
   end
 
   def track_event([:engine, :insert_job, _], _, %{job: job}, tab) do
-    series = if job.state == "scheduled", do: :scheduled, else: :available
-
     insert_or_update(tab, [
-      {%{series: series, queue: job.queue, type: :delta}, 1}
+      {%{series: String.to_existing_atom(job.state), queue: job.queue, type: :delta}, 1}
     ])
   end
 
-  def track_event([:engine, :insert_all_jobs, _], _, %{changesets: changesets}, tab) do
-    IO.inspect(changesets, label: "CHANGESETS")
+  def track_event([:engine, :insert_all_jobs, _], _, %{jobs: jobs}, tab) do
+    objects =
+      jobs
+      |> Enum.group_by(&{&1.state, &1.queue})
+      |> Enum.map(fn {{state, queue}, jobs} ->
+        {%{series: String.to_existing_atom(state), queue: queue, type: :delta}, length(jobs)}
+      end)
 
-    :ok
+    insert_or_update(tab, objects)
+  end
+
+  def track_event([:plugin, _], _, %{pruned_jobs: jobs}, tab) do
+    objects =
+      jobs
+      |> Enum.group_by(&{&1.state, &1.queue})
+      |> Enum.map(fn {{state, queue}, jobs} ->
+        {%{series: String.to_existing_atom(state), queue: queue, type: :delta}, -length(jobs)}
+      end)
+
+    insert_or_update(tab, objects)
+  end
+
+  def track_event([:plugin, _], _, %{staged_jobs: jobs}, tab) do
+    jobs
+    |> jobs_to_objects(:available)
+    |> then(&insert_or_update(tab, &1))
+  end
+
+  def track_event([:plugin, _], _, %{rescued_jobs: _} = meta, tab) do
+    %{discarded_jobs: discarded_jobs, rescued_jobs: rescued_jobs} = meta
+
+    discarded_jobs
+    |> jobs_to_objects(:discarded)
+    |> then(&insert_or_update(tab, &1))
+
+    rescued_jobs
+    |> jobs_to_objects(:available)
+    |> then(&insert_or_update(tab, &1))
   end
 
   def track_event(_event, _measure, _meta, _tab), do: :ok
+
+  defp jobs_to_objects(jobs, new_series) do
+    jobs
+    |> Enum.group_by(&{&1.state, &1.queue})
+    |> Enum.flat_map(fn {{state, queue}, jobs} ->
+      old_series = String.to_existing_atom(state)
+      size = length(jobs)
+
+      [
+        {%{series: new_series, queue: queue, type: :delta}, size},
+        {%{series: old_series, queue: queue, type: :delta}, -size}
+      ]
+    end)
+  end
 
   defp insert_or_update(table, objects) when is_list(objects) do
     for object <- objects, do: insert_or_update(table, object)
