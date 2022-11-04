@@ -28,6 +28,10 @@ defmodule Oban.Met.Recorder do
     {300, 86_400}
   ]
 
+  @default_timeslice_opts [filters: [], label: :any, ntile: 1.0, lookback: 5, by: 1]
+
+  @default_latest_opts [filters: [], group: nil, ntile: 1.0, lookback: 5]
+
   defstruct [
     :compact_timer,
     :conf,
@@ -61,9 +65,9 @@ defmodule Oban.Met.Recorder do
 
   @spec latest(GenServer.name(), series(), Keyword.t()) :: %{optional(String.t()) => value()}
   def latest(name, series, opts \\ []) do
-    {:ok, table} = Registry.meta(Oban.Registry, name)
+    opts = Keyword.validate!(opts, @default_latest_opts)
 
-    opts = Keyword.validate!(opts, [group: nil, ntile: 1.0, lookback: 5])
+    {:ok, table} = Registry.meta(Oban.Registry, name)
 
     since = Keyword.fetch!(opts, :lookback)
     group = Keyword.fetch!(opts, :group)
@@ -98,9 +102,9 @@ defmodule Oban.Met.Recorder do
 
   @spec timeslice(GenServer.name(), series(), Keyword.t()) :: [{ts(), value(), label()}]
   def timeslice(name, series, opts \\ []) do
-    {:ok, table} = Registry.meta(Oban.Registry, name)
+    opts = Keyword.validate!(opts, @default_timeslice_opts)
 
-    opts = Keyword.validate!(opts, [label: :any, ntile: 1.0, lookback: 5, by: 1])
+    {:ok, table} = Registry.meta(Oban.Registry, name)
 
     label = Keyword.fetch!(opts, :label)
     ntile = Keyword.fetch!(opts, :ntile)

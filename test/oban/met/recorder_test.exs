@@ -110,8 +110,7 @@ defmodule Oban.Met.RecorderTest do
       store(:a, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts(-2))
       store(:a, :gauge, 4, %{"queue" => "alpha"}, timestamp: ts(-3))
       store(:a, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts(-4))
-      store(:a, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts(-5))
-      store(:a, :gauge, 5, %{"queue" => "alpha"}, timestamp: ts(-6))
+      store(:a, :gauge, 5, %{"queue" => "alpha"}, timestamp: ts(-5))
 
       assert [{ts, value, label} | _] = timeslice(:a)
 
@@ -119,7 +118,7 @@ defmodule Oban.Met.RecorderTest do
       assert is_integer(value)
       refute label
 
-      assert [5, 1, 1, 4, 1, 1] = timeslice_values(:a)
+      assert [5, 1, 4, 1, 1] = timeslice_values(:a)
       assert [5, 4, 1] = timeslice_values(:a, by: 2)
       assert [5, 4] = timeslice_values(:a, by: 3)
       assert [5] = timeslice_values(:a, by: 6)
@@ -260,7 +259,7 @@ defmodule Oban.Met.RecorderTest do
   describe "automatic compaction" do
     setup :start_supervised_oban
 
-    test "automatically compacting on an interval", %{conf: conf} do
+    test "compacting on an interval", %{conf: conf} do
       pid = start_supervised!({Recorder, conf: conf, name: @name, compact_periods: [{5, 60}]})
 
       store(:a, :gauge, 4, %{queue: :alpha}, timestamp: ts(-3))
@@ -277,7 +276,7 @@ defmodule Oban.Met.RecorderTest do
 
       send(pid, :compact)
 
-      Process.sleep(5)
+      Process.sleep(10)
 
       assert length(lookup(:a)) == 2
       assert length(lookup(:b)) == 2
