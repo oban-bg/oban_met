@@ -136,6 +136,58 @@ defmodule Oban.Met.ReporterTest do
       assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha")
     end
 
+    @tag :engine_events
+    test "capturing bulk cancellation counts", %{conf: conf, pid: pid} do
+      jobs = [
+        %Job{queue: "alpha", state: "executing"},
+        %Job{queue: "alpha", state: "scheduled"},
+        %Job{queue: "gamma", state: "retryable"},
+        %Job{queue: "gamma", state: "available"}
+      ]
+
+      event = [:oban, :engine, :cancel_all_jobs, :stop]
+
+      insert_tracked(conf, jobs)
+
+      execute(event, %{}, %{conf: conf, jobs: jobs})
+
+      metrics = Reporter.all_metrics(pid)
+
+      assert 2 == find_metric(metrics, series: :cancelled, queue: "alpha")
+      assert 2 == find_metric(metrics, series: :cancelled, queue: "gamma")
+
+      assert 0 == find_metric(metrics, series: :executing, queue: "alpha")
+      assert 0 == find_metric(metrics, series: :scheduled, queue: "alpha")
+      assert 0 == find_metric(metrics, series: :retryable, queue: "gamma")
+      assert 0 == find_metric(metrics, series: :available, queue: "gamma")
+    end
+
+    @tag :engine_events
+    test "capturing bulk retry counts", %{conf: conf, pid: pid} do
+      jobs = [
+        %Job{queue: "alpha", state: "retryable"},
+        %Job{queue: "alpha", state: "retryable"},
+        %Job{queue: "gamma", state: "completed"},
+        %Job{queue: "gamma", state: "cancelled"}
+      ]
+
+      event = [:oban, :engine, :retry_all_jobs, :stop]
+
+      insert_tracked(conf, jobs)
+
+      execute(event, %{}, %{conf: conf, jobs: jobs})
+
+      metrics = Reporter.all_metrics(pid)
+
+      assert 2 == find_metric(metrics, series: :available, queue: "alpha")
+      assert 2 == find_metric(metrics, series: :available, queue: "gamma")
+
+      assert 0 == find_metric(metrics, series: :retryable, queue: "alpha")
+      assert 0 == find_metric(metrics, series: :retryable, queue: "alpha")
+      assert 0 == find_metric(metrics, series: :completed, queue: "gamma")
+      assert 0 == find_metric(metrics, series: :cancelled, queue: "gamma")
+    end
+
     @tag :plugin_events
     test "capturing pruned_job counts", %{conf: conf, pid: pid} do
       insert_tracked(conf, [

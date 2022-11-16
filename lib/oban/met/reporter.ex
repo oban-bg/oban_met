@@ -134,7 +134,9 @@ defmodule Oban.Met.Reporter do
     [:oban, :job, :exception],
     [:oban, :plugin, :stop],
     [:oban, :engine, :insert_job, :stop],
-    [:oban, :engine, :insert_all_jobs, :stop]
+    [:oban, :engine, :insert_all_jobs, :stop],
+    [:oban, :engine, :cancel_all_jobs, :stop],
+    [:oban, :engine, :retry_all_jobs, :stop]
   ]
 
   defp attach_events(%State{conf: conf, table: table} = state) do
@@ -196,6 +198,18 @@ defmodule Oban.Met.Reporter do
     insert_or_update(tab, objects)
   end
 
+  def track_event([:engine, :cancel_all_jobs, _], _, %{jobs: jobs}, tab) do
+    jobs
+    |> jobs_to_objects(:cancelled)
+    |> then(&insert_or_update(tab, &1))
+  end
+
+  def track_event([:engine, :retry_all_jobs, _], _, %{jobs: jobs}, tab) do
+    jobs
+    |> jobs_to_objects(:available)
+    |> then(&insert_or_update(tab, &1))
+  end
+
   def track_event([:plugin, _], _, %{pruned_jobs: jobs}, tab) do
     objects =
       jobs
@@ -217,10 +231,12 @@ defmodule Oban.Met.Reporter do
     %{discarded_jobs: discarded_jobs, rescued_jobs: rescued_jobs} = meta
 
     discarded_jobs
+    |> Enum.map(&%{&1 | state: "executing"})
     |> jobs_to_objects(:discarded)
     |> then(&insert_or_update(tab, &1))
 
     rescued_jobs
+    |> Enum.map(&%{&1 | state: "executing"})
     |> jobs_to_objects(:available)
     |> then(&insert_or_update(tab, &1))
   end

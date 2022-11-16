@@ -46,7 +46,7 @@ defmodule Oban.Met.MixProject do
 
   defp deps do
     [
-      {:oban, "~> 2.13", github: "sorentwo/oban"},
+      {:oban, "~> 2.14.0-dev", github: "sorentwo/oban"},
       {:telemetry, "~> 1.1"},
       {:benchee, "~> 1.0", only: [:test, :dev], runtime: false},
       {:credo, "~> 1.6", only: [:test, :dev], runtime: false},
