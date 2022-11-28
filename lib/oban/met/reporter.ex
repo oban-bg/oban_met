@@ -18,7 +18,9 @@ defmodule Oban.Met.Reporter do
     :report_timer,
     :table,
     checkpoint_interval: :timer.minutes(1),
-    report_interval: :timer.seconds(1)
+    report_interval: :timer.seconds(1),
+    retry_attempts: 5,
+    retry_backoff: :timer.seconds(1)
   ]
 
   @trans_state %{
@@ -84,15 +86,16 @@ defmodule Oban.Met.Reporter do
 
   @impl GenServer
   def handle_info(:checkpoint, %State{conf: conf, table: table} = state) do
-    # TODO: Guard against connection errors, this needs a backoff
-    query =
-      Job
-      |> group_by([j], [j.queue, j.state])
-      |> select([j], {j.queue, j.state, count(j.id)})
+    with_retry(state, fn ->
+      query =
+        Job
+        |> group_by([j], [j.queue, j.state])
+        |> select([j], {j.queue, j.state, count(j.id)})
 
-    for {queue, state, count} <- Repo.all(conf, query, timeout: :infinity) do
-      :ets.insert(table, {%{series: state, type: :gauge, queue: queue}, Gauge.new(count)})
-    end
+      for {queue, state, count} <- Repo.all(conf, query, timeout: :infinity) do
+        :ets.insert(table, {%{series: state, type: :gauge, queue: queue}, Gauge.new(count)})
+      end
+    end)
 
     {:noreply, schedule_checkpoint(state)}
   end
@@ -292,5 +295,28 @@ defmodule Oban.Met.Reporter do
     timer = Process.send_after(self(), :report, state.report_interval)
 
     %{state | report_timer: timer}
+  end
+
+  # Stability
+
+  defp jittery_sleep(base, jitter \\ 0.5) do
+    diff = base * jitter
+
+    trunc(base - diff)..trunc(base + diff)
+    |> Enum.random()
+    |> Process.sleep()
+  end
+
+  defp with_retry(state, fun, attempt \\ 0) do
+    fun.()
+  rescue
+    error in [DBConnection.ConnectionError, Postgrex.Error] ->
+      if attempt < state.retry_attempts do
+        jittery_sleep(attempt * state.retry_backoff)
+
+        with_retry(state, fun, attempt + 1)
+      else
+        reraise error, __STACKTRACE__
+      end
   end
 end
