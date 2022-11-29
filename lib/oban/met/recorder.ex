@@ -1,7 +1,7 @@
 defmodule Oban.Met.Recorder do
-  @moduledoc """
-  Aggregate metrics via pubsub for querying and compaction.
-  """
+  @moduledoc false
+
+  # Aggregate metrics via pubsub for querying and compaction.
 
   use GenServer
 
@@ -9,7 +9,7 @@ defmodule Oban.Met.Recorder do
   alias Oban.Met.{Gauge, Sketch, Value}
   alias Oban.Notifier
 
-  @type name_or_table :: GenServer.name() | :ets.t()
+  @type name_or_table :: GenServer.name() | :ets.tid()
   @type series :: atom() | String.t()
   @type value :: Value.t()
   @type label :: String.t()
@@ -124,10 +124,13 @@ defmodule Oban.Met.Recorder do
   end
 
   @doc false
-  def store(name_or_table, series, type, value, labels, opts \\ [])
+  def store(name, series, type, value, labels, opts \\ []) when type in [:gauge, :delta, :sketch] do
+    with {:ok, table} <- Registry.meta(Oban.Registry, name) do
+      inner_store(table, series, type, value, labels, opts)
+    end
+  end
 
-  def store(table, series, type, value, labels, opts)
-      when is_reference(table) and type in [:gauge, :delta, :sketch] do
+  defp inner_store(table, series, type, value, labels, opts) do
     ts = Keyword.get(opts, :timestamp, System.system_time(:second))
 
     series = to_string(series)
@@ -150,12 +153,6 @@ defmodule Oban.Met.Recorder do
     end
   end
 
-  def store(name, series, type, value, labels, opts) do
-    with {:ok, table} <- Registry.meta(Oban.Registry, name) do
-      store(table, series, type, value, labels, opts)
-    end
-  end
-
   defp get_latest(table, series, labels) do
     match = {{series, labels, :_}, :_, :_, :_}
 
@@ -166,8 +163,14 @@ defmodule Oban.Met.Recorder do
   end
 
   @doc false
-  @spec compact(name_or_table(), [period()]) :: any()
-  def compact(table, periods) when is_reference(table) and is_list(periods) do
+  def compact(name, periods) when is_list(periods) do
+    with {:ok, table} <- Registry.meta(Oban.Registry, name) do
+      inner_compact(table, periods)
+    end
+  end
+
+  @doc false
+  def inner_compact(table, periods) do
     delete_outdated(table, periods)
 
     Enum.reduce(periods, System.system_time(:second), fn {step, duration}, ts ->
@@ -180,20 +183,14 @@ defmodule Oban.Met.Recorder do
 
       objects
       |> Enum.chunk_by(fn {{ser, lab, max}, _, _, _} -> {ser, lab, div(ts - max - 1, step)} end)
-      |> Enum.map(&compact/1)
+      |> Enum.map(&compact_object/1)
       |> then(&:ets.insert(table, &1))
 
       since
     end)
   end
 
-  def compact(name, periods) do
-    with {:ok, table} <- Registry.meta(Oban.Registry, name) do
-      compact(table, periods)
-    end
-  end
-
-  defp compact([{{series, labels, _}, _, type, _} | _] = metrics) do
+  defp compact_object([{{series, labels, _}, _, type, _} | _] = metrics) do
     {min_ts, max_ts} =
       metrics
       |> Enum.flat_map(fn {{_, _, max_ts}, min_ts, _, _} -> [max_ts, min_ts] end)
@@ -254,7 +251,7 @@ defmodule Oban.Met.Recorder do
           _ -> value
         end
 
-      store(state.table, series, type, value, labels)
+      inner_store(state.table, series, type, value, labels, [])
     end
 
     {:noreply, state}
@@ -265,7 +262,7 @@ defmodule Oban.Met.Recorder do
   end
 
   def handle_info(:compact, %State{compact_periods: periods, table: table} = state) do
-    Task.start(__MODULE__, :compact, [table, periods])
+    Task.start(__MODULE__, :inner_compact, [table, periods])
 
     {:noreply, schedule_compact(state)}
   end

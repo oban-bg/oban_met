@@ -1,10 +1,10 @@
 defmodule Oban.Met.Examiner do
-  @moduledoc """
-  Examiner uses notifications to periodically exchange queue state information between all
-  interested nodes.
+  @moduledoc false
 
-  This module is more of a "producer queue checker", but that name stinks.
-  """
+  # Examiner uses notifications to periodically exchange queue state information between all
+  # interested nodes.
+
+  # This module is more of a "producer queue checker", but that name stinks.
 
   use GenServer
 
@@ -50,7 +50,7 @@ defmodule Oban.Met.Examiner do
     end
   end
 
-  @spec purge(name_or_table(), pos_integer()) :: {:ok, non_neg_integer()} | {:error, term()}
+  @spec purge(name_or_table(), pos_integer()) :: {:ok, non_neg_integer()} | {:error, :bad_table_reference}
   def purge(name_or_table, ttl) when is_integer(ttl) and ttl > 0 do
     with {:ok, table} <- fetch_table(name_or_table) do
       expires = System.system_time(:millisecond) - ttl
@@ -60,12 +60,12 @@ defmodule Oban.Met.Examiner do
     end
   end
 
-  @spec fetch_table(name_or_table()) :: {:ok, :ets.tab()} | {:error, term()}
+  @spec fetch_table(name_or_table()) :: {:ok, :ets.table()} | {:error, term()}
   def fetch_table(table) when is_reference(table), do: {:ok, table}
 
   def fetch_table(name) do
     case Registry.meta(Oban.Registry, name) do
-      {:ok, table} when is_reference(table) ->
+      {:ok, table} when is_atom(table) or is_reference(table) ->
         if :ets.info(table) != :undefined do
           {:ok, table}
         else

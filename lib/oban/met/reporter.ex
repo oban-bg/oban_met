@@ -1,7 +1,7 @@
 defmodule Oban.Met.Reporter do
-  @moduledoc """
-  Track local telemetry events and periodically relay them to external recorders.
-  """
+  @moduledoc false
+
+  # Track local telemetry events and periodically relay them to external recorders.
 
   use GenServer
 
@@ -46,7 +46,7 @@ defmodule Oban.Met.Reporter do
   end
 
   @doc false
-  @spec all_metrics(GenSever.name()) :: [tuple()]
+  @spec all_metrics(GenServer.name()) :: [tuple()]
   def all_metrics(name) do
     GenServer.call(name, :all_metrics)
   end
