@@ -5,7 +5,8 @@ config :oban_met, auto_start: false
 config :oban_met, ecto_repos: [Oban.Pro.Repo]
 
 config :oban_met, Oban.Met.Repo,
-  database: "oban_met_test",
+  priv: "test/support/",
+  url: System.get_env("DATABASE_URL") || "postgres://localhost:5432/oban_met_test",
   pool: Ecto.Adapters.SQL.Sandbox
 
 config :logger, level: :warn
