@@ -37,7 +37,7 @@ defmodule Oban.Met.Examiner do
     end
   end
 
-  @spec store(name_or_table(), map(), [timestamp: integer()]) :: :ok | {:error, term()}
+  @spec store(name_or_table(), map(), timestamp: integer()) :: :ok | {:error, term()}
   def store(name_or_table, check, opts \\ []) when is_map(check) do
     with {:ok, table} <- fetch_table(name_or_table) do
       %{"node" => node, "name" => name, "queue" => queue} = check
@@ -50,7 +50,8 @@ defmodule Oban.Met.Examiner do
     end
   end
 
-  @spec purge(name_or_table(), pos_integer()) :: {:ok, non_neg_integer()} | {:error, :bad_table_reference}
+  @spec purge(name_or_table(), pos_integer()) ::
+          {:ok, non_neg_integer()} | {:error, :bad_table_reference}
   def purge(name_or_table, ttl) when is_integer(ttl) and ttl > 0 do
     with {:ok, table} <- fetch_table(name_or_table) do
       expires = System.system_time(:millisecond) - ttl

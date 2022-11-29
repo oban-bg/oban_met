@@ -7,9 +7,7 @@ defmodule Oban.Met.Test do
 
       on_exit(fn -> Application.put_env(:oban_met, :auto_start, false) end)
 
-      start_supervised!(
-        {Oban, [notifier: Oban.Notifiers.PG, repo: Oban.Met.Repo]}
-      )
+      start_supervised!({Oban, [notifier: Oban.Notifiers.PG, repo: Oban.Met.Repo]})
 
       with_backoff(fn ->
         assert %{active: active} = Supervisor.count_children(Oban.Met.AppSup)

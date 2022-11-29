@@ -124,7 +124,8 @@ defmodule Oban.Met.Recorder do
   end
 
   @doc false
-  def store(name, series, type, value, labels, opts \\ []) when type in [:gauge, :delta, :sketch] do
+  def store(name, series, type, value, labels, opts \\ [])
+      when type in [:gauge, :delta, :sketch] do
     with {:ok, table} <- Registry.meta(Oban.Registry, name) do
       inner_store(table, series, type, value, labels, opts)
     end

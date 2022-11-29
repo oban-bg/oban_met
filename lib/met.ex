@@ -25,19 +25,19 @@ defmodule Oban.Met do
           | {:state, filter_value()}
 
   @type latest_opts :: [
-    filters: [filter_opts()],
-    group: String.t(),
-    lookback: pos_integer(),
-    ntile: float()
-  ]
+          filters: [filter_opts()],
+          group: String.t(),
+          lookback: pos_integer(),
+          ntile: float()
+        ]
 
   @type timeslice_opts :: [
-    by: pos_integer(),
-    filters: [filter_opts()],
-    label: :any | String.t(),
-    lookback: pos_integer(),
-    ntile: float()
-  ]
+          by: pos_integer(),
+          filters: [filter_opts()],
+          label: :any | String.t(),
+          lookback: pos_integer(),
+          ntile: float()
+        ]
 
   @doc """
   Retrieve all stored producer checks.
