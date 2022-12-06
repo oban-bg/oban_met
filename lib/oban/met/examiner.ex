@@ -31,53 +31,35 @@ defmodule Oban.Met.Examiner do
 
   @spec all_checks(name_or_table()) :: [map()]
   def all_checks(name_or_table) do
-    case fetch_table(name_or_table) do
-      {:ok, table} -> :ets.select(table, [{{:_, :_, :"$1"}, [], [:"$1"]}])
-      {:error, _} -> []
-    end
+    name_or_table
+    |> table()
+    |> :ets.select([{{:_, :_, :"$1"}, [], [:"$1"]}])
   end
 
-  @spec store(name_or_table(), map(), timestamp: integer()) :: :ok | {:error, term()}
+  @spec store(name_or_table(), map(), timestamp: integer()) :: :ok
   def store(name_or_table, check, opts \\ []) when is_map(check) do
-    with {:ok, table} <- fetch_table(name_or_table) do
-      %{"node" => node, "name" => name, "queue" => queue} = check
+    %{"node" => node, "name" => name, "queue" => queue} = check
 
-      timestamp = Keyword.get(opts, :timestamp, System.system_time(:millisecond))
+    timestamp = Keyword.get(opts, :timestamp, System.system_time(:millisecond))
 
-      :ets.insert(table, {{node, name, queue}, timestamp, check})
+    name_or_table
+    |> table()
+    |> :ets.insert({{node, name, queue}, timestamp, check})
 
-      :ok
-    end
+    :ok
   end
 
-  @spec purge(name_or_table(), pos_integer()) ::
-          {:ok, non_neg_integer()} | {:error, :bad_table_reference}
+  @spec purge(name_or_table(), pos_integer()) :: {:ok, non_neg_integer()}
   def purge(name_or_table, ttl) when is_integer(ttl) and ttl > 0 do
-    with {:ok, table} <- fetch_table(name_or_table) do
-      expires = System.system_time(:millisecond) - ttl
-      pattern = [{{:_, :"$1", :_}, [{:<, :"$1", expires}], [true]}]
+    expires = System.system_time(:millisecond) - ttl
+    pattern = [{{:_, :"$1", :_}, [{:<, :"$1", expires}], [true]}]
 
-      {:ok, :ets.select_delete(table, pattern)}
-    end
-  end
+    deleted =
+      name_or_table
+      |> table()
+      |> :ets.select_delete(pattern)
 
-  @spec fetch_table(name_or_table()) :: {:ok, :ets.table()} | {:error, term()}
-  def fetch_table(table) when is_reference(table), do: {:ok, table}
-
-  def fetch_table(name) do
-    case Registry.meta(Oban.Registry, name) do
-      {:ok, table} when is_atom(table) or is_reference(table) ->
-        if :ets.info(table) != :undefined do
-          {:ok, table}
-        else
-          {:error, :bad_table_reference}
-        end
-
-      result ->
-        {:error, result}
-    end
-  rescue
-    ArgumentError -> {:error, :bad_table_reference}
+    {:ok, deleted}
   end
 
   # Callbacks
@@ -93,8 +75,9 @@ defmodule Oban.Met.Examiner do
       |> struct!(Keyword.put(opts, :table, table))
       |> schedule_check()
 
-    :ok = Notifier.listen(state.conf.name, [:gossip])
-    :ok = Registry.put_meta(Oban.Registry, state.name, table)
+    Notifier.listen(state.conf.name, [:gossip])
+
+    Registry.register(Oban.Registry, state.name, table)
 
     {:ok, state}
   end
@@ -132,6 +115,16 @@ defmodule Oban.Met.Examiner do
 
   def handle_info({:notification, :gossip, _payload}, state) do
     {:noreply, state}
+  end
+
+  # Table
+
+  defp table(tab) when is_reference(tab), do: tab
+
+  defp table(name) do
+    [{_pid, table}] = Registry.lookup(Oban.Registry, name)
+
+    table
   end
 
   # Scheduling

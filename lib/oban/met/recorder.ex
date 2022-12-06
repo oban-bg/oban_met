@@ -56,18 +56,14 @@ defmodule Oban.Met.Recorder do
 
   @spec lookup(GenServer.name(), series()) :: [term()]
   def lookup(name, series) do
-    {:ok, table} = Registry.meta(Oban.Registry, name)
-
     match = {{to_string(series), :_, :_}, :_, :_, :_}
 
-    :ets.select(table, [{match, [], [:"$_"]}])
+    :ets.select(table(name), [{match, [], [:"$_"]}])
   end
 
   @spec latest(GenServer.name(), series(), Keyword.t()) :: %{optional(String.t()) => value()}
   def latest(name, series, opts \\ []) do
     opts = Keyword.validate!(opts, @default_latest_opts)
-
-    {:ok, table} = Registry.meta(Oban.Registry, name)
 
     since = Keyword.fetch!(opts, :lookback)
     group = Keyword.fetch!(opts, :group)
@@ -76,7 +72,8 @@ defmodule Oban.Met.Recorder do
     match = {{to_string(series), :"$1", :"$2"}, :_, :_, :_}
     guard = filters_to_guards(opts[:filters], {:>=, :"$2", systm - since})
 
-    table
+    name
+    |> table()
     |> :ets.select_reverse([{match, [guard], [:"$_"]}])
     |> Enum.dedup_by(fn {{_, labels, _}, _, _, _} -> labels end)
     |> Enum.group_by(fn {{_, labels, _}, _, _, _} -> labels[group] end)
@@ -104,8 +101,6 @@ defmodule Oban.Met.Recorder do
   def timeslice(name, series, opts \\ []) do
     opts = Keyword.validate!(opts, @default_timeslice_opts)
 
-    {:ok, table} = Registry.meta(Oban.Registry, name)
-
     label = Keyword.fetch!(opts, :label)
     ntile = Keyword.fetch!(opts, :ntile)
     since = Keyword.fetch!(opts, :lookback)
@@ -115,7 +110,8 @@ defmodule Oban.Met.Recorder do
     match = {{to_string(series), :"$1", :"$2"}, :_, :_, :_}
     guard = filters_to_guards(opts[:filters], {:>=, :"$2", systm - since})
 
-    table
+    name
+    |> table()
     |> :ets.select_reverse([{match, [guard], [:"$_"]}])
     |> Enum.map(fn {{_, labels, ts}, _, _, value} -> {ts, value, labels[label]} end)
     |> Enum.sort_by(fn {ts, _, label} -> {label, ts} end)
@@ -126,9 +122,9 @@ defmodule Oban.Met.Recorder do
   @doc false
   def store(name, series, type, value, labels, opts \\ [])
       when type in [:gauge, :delta, :sketch] do
-    with {:ok, table} <- Registry.meta(Oban.Registry, name) do
-      inner_store(table, series, type, value, labels, opts)
-    end
+    name
+    |> table()
+    |> inner_store(series, type, value, labels, opts)
   end
 
   defp inner_store(table, series, type, value, labels, opts) do
@@ -165,9 +161,9 @@ defmodule Oban.Met.Recorder do
 
   @doc false
   def compact(name, periods) when is_list(periods) do
-    with {:ok, table} <- Registry.meta(Oban.Registry, name) do
-      inner_compact(table, periods)
-    end
+    name
+    |> table()
+    |> inner_compact(periods)
   end
 
   @doc false
@@ -234,7 +230,7 @@ defmodule Oban.Met.Recorder do
       |> subscribe_gossip()
       |> schedule_compact()
 
-    Registry.put_meta(Oban.Registry, state.name, table)
+    Registry.register(Oban.Registry, state.name, table)
 
     {:ok, state}
   end
@@ -266,6 +262,14 @@ defmodule Oban.Met.Recorder do
     Task.start(__MODULE__, :inner_compact, [table, periods])
 
     {:noreply, schedule_compact(state)}
+  end
+
+  # Table Meta
+
+  defp table(name) do
+    [{_pid, table}] = Registry.lookup(Oban.Registry, name)
+
+    table
   end
 
   # Scheduling
