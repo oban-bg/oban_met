@@ -64,6 +64,9 @@ defmodule Oban.Met.Reporter do
       |> struct!(Keyword.put(opts, :table, table))
       |> attach_events()
 
+    # Used to ensure testing helpers to auto-allow this module for sandbox access.
+    :telemetry.execute([:oban, :plugin, :init], %{}, %{conf: state.conf, plugin: __MODULE__})
+
     {:ok, state, {:continue, :checkpoint}}
   end
 
