@@ -124,6 +124,7 @@ defmodule Oban.Met.ReporterTest do
         %Job{queue: "alpha", state: "available"},
         %Job{queue: "alpha", state: "scheduled"},
         %Job{queue: "gamma", state: "available"},
+        %Job{queue: "gamma", state: "retryable"},
         %Job{queue: "gamma", state: "available"}
       ]
 
@@ -133,6 +134,7 @@ defmodule Oban.Met.ReporterTest do
 
       assert 1 == find_metric(metrics, series: :available, queue: "alpha")
       assert 2 == find_metric(metrics, series: :available, queue: "gamma")
+      assert 1 == find_metric(metrics, series: :retryable, queue: "gamma")
       assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha")
     end
 
