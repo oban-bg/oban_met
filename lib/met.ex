@@ -3,7 +3,9 @@ defmodule Oban.Met do
   Metric introspection for Oban.
   """
 
-  alias Oban.Met.{Examiner, Recorder, Value}
+  use Supervisor
+
+  alias Oban.Met.{Examiner, Recorder, Reporter, Value}
   alias Oban.Registry
 
   @type oban_name :: term()
@@ -39,11 +41,32 @@ defmodule Oban.Met do
           ntile: float()
         ]
 
+  @doc false
+  @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
+  def child_spec(opts) do
+    conf = Keyword.fetch!(opts, :conf)
+    name = Registry.via(conf.name, __MODULE__)
+
+    opts
+    |> super()
+    |> Map.put(:id, name)
+  end
+
+  @doc false
+  @spec start_link(Keyword.t()) :: Supervisor.on_start()
+  def start_link(opts) when is_list(opts) do
+    conf = Keyword.fetch!(opts, :conf)
+    name = Registry.via(conf.name, __MODULE__)
+
+    Supervisor.start_link(__MODULE__, opts, name: name)
+  end
+
   @doc """
   Retrieve all stored producer checks.
 
   This mimics the output of the legacy `Oban.Web.Plugins.Stats.all_gossip/1` function.
   """
+  @spec all_checks(Oban.name()) :: [map()]
   def all_checks(oban \\ Oban) do
     oban
     |> Registry.via(Examiner)
@@ -57,6 +80,7 @@ defmodule Oban.Met do
 
   This mimics the output of the legacy `Oban.Web.Plugins.Stats.all_counts/1` function.
   """
+  @spec all_gauges(Oban.name()) :: [map()]
   def all_gauges(oban \\ Oban) do
     name = Registry.via(oban, Recorder)
     base = Map.new(@states, &{&1, 0})
@@ -92,5 +116,28 @@ defmodule Oban.Met do
     oban
     |> Registry.via(Recorder)
     |> Recorder.timeslice(series, opts)
+  end
+
+  # Callbacks
+
+  @impl Supervisor
+  def init(opts) do
+    conf = Keyword.fetch!(opts, :conf)
+
+    children = [
+      {Examiner, conf: conf, name: Registry.via(conf.name, Examiner)},
+      {Recorder, conf: conf, name: Registry.via(conf.name, Recorder)},
+      {Reporter, conf: conf, name: Registry.via(conf.name, Reporter)}
+    ] ++ event_child(conf)
+
+    Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  defp event_child(conf) do
+    meta = %{pid: self(), conf: conf}
+
+    init_task = fn -> :telemetry.execute([:oban, :met, :init], %{}, meta) end
+
+    [Supervisor.child_spec({Task, init_task}, restart: :temporary)]
   end
 end

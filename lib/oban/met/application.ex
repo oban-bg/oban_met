@@ -3,8 +3,8 @@ defmodule Oban.Met.Application do
 
   use Application
 
-  @handler_id :oban_met_handler
   @supervisor Oban.Met.AppSup
+  @handler_id :oban_met_handler
 
   @impl Application
   def start(_type, _args) do
@@ -25,7 +25,7 @@ defmodule Oban.Met.Application do
     opts = Application.get_all_env(:oban_met)
 
     if opts[:auto_start] and conf.testing in opts[:auto_testing_modes] do
-      Supervisor.start_child(@supervisor, {Oban.Met.Supervisor, conf: conf})
+      Supervisor.start_child(@supervisor, {Oban.Met, conf: conf})
     end
   end
 end
