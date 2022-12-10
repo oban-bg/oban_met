@@ -147,7 +147,7 @@ defmodule Oban.Met.RecorderTest do
       store(:a, :gauge, 2, %{"queue" => "alpha", "node" => "b"}, timestamp: ts(-2))
       store(:a, :gauge, 2, %{"queue" => "gamma", "node" => "b"}, timestamp: ts(-2))
 
-      slices = timeslice(:a, label: "queue", since: 10)
+      slices = timeslice(:a, label: "queue", by: 1)
 
       slices
       |> Enum.chunk_by(&elem(&1, 2))

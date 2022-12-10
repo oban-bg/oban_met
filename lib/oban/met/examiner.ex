@@ -13,7 +13,14 @@ defmodule Oban.Met.Examiner do
 
   @type name_or_table :: :ets.tab() | GenServer.name()
 
-  defstruct [:conf, :name, :table, :timer, interval: :timer.seconds(1), ttl: :timer.seconds(30)]
+  defstruct [
+    :conf,
+    :name,
+    :table,
+    :timer,
+    interval: 750,
+    ttl: :timer.seconds(30)
+  ]
 
   @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
   def child_spec(opts) do

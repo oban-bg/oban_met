@@ -32,7 +32,7 @@ defmodule Oban.Met.Recorder do
     filters: [],
     group: nil,
     ntile: 1.0,
-    lookback: 5
+    lookback: 60
   ]
 
   @default_timeslice_opts [
@@ -40,7 +40,7 @@ defmodule Oban.Met.Recorder do
     interpolate: true,
     label: :any,
     ntile: 1.0,
-    lookback: 5,
+    lookback: 60,
     by: 1
   ]
 
@@ -135,13 +135,14 @@ defmodule Oban.Met.Recorder do
   defp interpolate(list, step), do: interpolate(list, step, [])
 
   defp interpolate([{cts, val, lab} = curr, {nts, _, lab} = next | tail], step, acc) do
-    if cts + step < nts do
-      hold = Enum.map((nts - step)..(cts + step)//step, &{&1, val, lab})
+    hold =
+      if cts + step < nts do
+        Enum.map((nts - step)..(cts + step)//step, &{&1, val, lab})
+      else
+        []
+      end
 
-      interpolate([next | tail], step, [hold, curr | acc])
-    else
-      interpolate([next | tail], step, [curr | acc])
-    end
+    interpolate([next | tail], step, [hold, curr | acc])
   end
 
   defp interpolate([head | tail], step, acc) do

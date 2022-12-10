@@ -18,7 +18,7 @@ defmodule Oban.Met.Reporter do
     :report_timer,
     :table,
     checkpoint_interval: :timer.minutes(1),
-    report_interval: :timer.seconds(1),
+    report_interval: 750,
     retry_attempts: 5,
     retry_backoff: :timer.seconds(1)
   ]
