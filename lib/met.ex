@@ -62,37 +62,15 @@ defmodule Oban.Met do
   end
 
   @doc """
-  Retrieve all stored producer checks.
+  Retrieve stored producer checks.
 
   This mimics the output of the legacy `Oban.Web.Plugins.Stats.all_gossip/1` function.
   """
-  @spec all_checks(Oban.name()) :: [map()]
-  def all_checks(oban \\ Oban) do
+  @spec checks(Oban.name()) :: [map()]
+  def checks(oban \\ Oban) do
     oban
     |> Registry.via(Examiner)
     |> Examiner.all_checks()
-  end
-
-  @states ~w(available cancelled completed discarded executing retryable scheduled)
-
-  @doc """
-  Retrieve gauges for all job states (which is typically all gauges).
-
-  This mimics the output of the legacy `Oban.Web.Plugins.Stats.all_counts/1` function.
-  """
-  @spec all_gauges(Oban.name()) :: [map()]
-  def all_gauges(oban \\ Oban) do
-    name = Registry.via(oban, Recorder)
-    base = Map.new(@states, &{&1, 0})
-
-    @states
-    |> Enum.map(&{&1, Recorder.latest(name, &1, group: "queue", lookback: 60)})
-    |> Enum.reduce(%{}, fn {state, queues}, acc ->
-      Enum.reduce(queues, acc, fn {queue, value}, sub_acc ->
-        Map.update(sub_acc, queue, %{base | state => value}, &Map.put(&1, state, value))
-      end)
-    end)
-    |> Enum.map(fn {queue, counts} -> Map.put(counts, "name", queue) end)
   end
 
   @doc """
