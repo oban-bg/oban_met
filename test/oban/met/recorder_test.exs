@@ -133,6 +133,37 @@ defmodule Oban.Met.RecorderTest do
 
       assert [{_, _, "alpha"}, {_, _, "alpha"} | _] = timeslice(:a, label: "queue")
     end
+
+    test "interpolating slices over the duration of the lookback" do
+      store(:a, :gauge, 6, %{"queue" => "alpha", "node" => "a"}, timestamp: ts(-6))
+      store(:a, :gauge, 6, %{"queue" => "alpha", "node" => "b"}, timestamp: ts(-6))
+      store(:a, :gauge, 6, %{"queue" => "gamma", "node" => "a"}, timestamp: ts(-6))
+
+      store(:a, :gauge, 4, %{"queue" => "alpha", "node" => "a"}, timestamp: ts(-4))
+      store(:a, :gauge, 4, %{"queue" => "alpha", "node" => "b"}, timestamp: ts(-4))
+      store(:a, :gauge, 4, %{"queue" => "gamma", "node" => "b"}, timestamp: ts(-4))
+
+      store(:a, :gauge, 2, %{"queue" => "alpha", "node" => "a"}, timestamp: ts(-2))
+      store(:a, :gauge, 2, %{"queue" => "alpha", "node" => "b"}, timestamp: ts(-2))
+      store(:a, :gauge, 2, %{"queue" => "gamma", "node" => "b"}, timestamp: ts(-2))
+
+      slices = timeslice(:a, label: "queue", since: 10)
+
+      slices
+      |> Enum.chunk_by(&elem(&1, 2))
+      |> Enum.each(fn slice ->
+        timestamps = Enum.map(slice, &elem(&1, 0))
+
+        assert [1, 1, 1, 1] = Enum.zip_with([timestamps, tl(timestamps)], fn [x, y] -> y - x end)
+      end)
+
+      for label <- ~w(alpha gamma) do
+        assert [6, 6, 4, 4, 2] =
+                 slices
+                 |> Enum.filter(&(elem(&1, 2) == label))
+                 |> Enum.map(&elem(&1, 1))
+      end
+    end
   end
 
   describe "compact/2" do

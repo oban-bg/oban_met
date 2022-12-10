@@ -28,9 +28,21 @@ defmodule Oban.Met.Recorder do
     {300, 86_400}
   ]
 
-  @default_timeslice_opts [filters: [], label: :any, ntile: 1.0, lookback: 5, by: 1]
+  @default_latest_opts [
+    filters: [],
+    group: nil,
+    ntile: 1.0,
+    lookback: 5
+  ]
 
-  @default_latest_opts [filters: [], group: nil, ntile: 1.0, lookback: 5]
+  @default_timeslice_opts [
+    filters: [],
+    interpolate: true,
+    label: :any,
+    ntile: 1.0,
+    lookback: 5,
+    by: 1
+  ]
 
   defstruct [
     :compact_timer,
@@ -68,9 +80,9 @@ defmodule Oban.Met.Recorder do
     since = Keyword.fetch!(opts, :lookback)
     group = Keyword.fetch!(opts, :group)
     ntile = Keyword.fetch!(opts, :ntile)
-    systm = System.system_time(:second)
+    stime = System.system_time(:second)
     match = {{to_string(series), :"$1", :"$2"}, :_, :_, :_}
-    guard = filters_to_guards(opts[:filters], {:>=, :"$2", systm - since})
+    guard = filters_to_guards(opts[:filters], {:>=, :"$2", stime - since})
 
     name
     |> table()
@@ -105,18 +117,41 @@ defmodule Oban.Met.Recorder do
     ntile = Keyword.fetch!(opts, :ntile)
     since = Keyword.fetch!(opts, :lookback)
     slice = Keyword.fetch!(opts, :by)
-    systm = System.system_time(:second)
+    stime = System.system_time(:second)
 
     match = {{to_string(series), :"$1", :"$2"}, :_, :_, :_}
-    guard = filters_to_guards(opts[:filters], {:>=, :"$2", systm - since})
+    guard = filters_to_guards(opts[:filters], {:>=, :"$2", stime - since})
 
     name
     |> table()
     |> :ets.select_reverse([{match, [guard], [:"$_"]}])
     |> Enum.map(fn {{_, labels, ts}, _, _, value} -> {ts, value, labels[label]} end)
     |> Enum.sort_by(fn {ts, _, label} -> {label, ts} end)
-    |> Enum.chunk_by(fn {ts, _, label} -> {label, div(systm - ts - 1, slice)} end)
+    |> interpolate(slice)
+    |> Enum.chunk_by(fn {ts, _, label} -> {label, div(stime - ts - 1, slice)} end)
     |> Enum.map(&merge_into_ntile(&1, ntile))
+  end
+
+  defp interpolate(list, step), do: interpolate(list, step, [])
+
+  defp interpolate([{cts, val, lab} = curr, {nts, _, lab} = next | tail], step, acc) do
+    if cts + step < nts do
+      hold = Enum.map((nts - step)..(cts + step)//step, &{&1, val, lab})
+
+      interpolate([next | tail], step, [hold, curr | acc])
+    else
+      interpolate([next | tail], step, [curr | acc])
+    end
+  end
+
+  defp interpolate([head | tail], step, acc) do
+    interpolate(tail, step, [head | acc])
+  end
+
+  defp interpolate([], _step, acc) do
+    acc
+    |> List.flatten()
+    |> Enum.reverse()
   end
 
   @doc false
