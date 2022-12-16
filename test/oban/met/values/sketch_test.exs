@@ -1,8 +1,9 @@
-defmodule Oban.Met.SketchTest do
+defmodule Oban.Met.Values.SketchTest do
   use ExUnit.Case, async: true
+
   use ExUnitProperties
 
-  alias Oban.Met.Sketch
+  alias Oban.Met.Values.Sketch
 
   doctest Sketch
 

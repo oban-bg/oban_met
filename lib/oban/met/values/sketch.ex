@@ -1,8 +1,9 @@
-defmodule Oban.Met.Sketch do
+defmodule Oban.Met.Values.Sketch do
   @moduledoc """
-  Derived from [DogSketch](https://github.com/moosecodebv/dog_sketch), based on DDSketch.
+  A fast and fully mergeable quantile sketch with relative error guarantees.
 
-  This variant has a hard-coded error rate of 0.02 for the sake of simplicity.
+  Derived from [DogSketch](https://github.com/moosecodebv/dog_sketch), based on DDSketch. This
+  variant has a hard-coded error rate of 0.02 for the sake of simplicity.
   """
 
   alias __MODULE__, as: Sketch
@@ -24,36 +25,23 @@ defmodule Oban.Met.Sketch do
 
   ## Examples
 
-      iex> sketch = Oban.Met.Sketch.new()
-      ...> Oban.Met.Sketch.size(sketch)
+      iex> sketch = Sketch.new()
+      ...> Sketch.size(sketch)
       0
 
-      iex> sketch = Oban.Met.Sketch.new([1, 2, 3])
-      ...> Oban.Met.Sketch.size(sketch)
+      iex> sketch = Sketch.new(1)
+      ...> Sketch.size(sketch)
+      1
+
+      iex> sketch = Sketch.new([1, 2, 3])
+      ...> Sketch.size(sketch)
       3
   """
-  @spec new([pos_integer()]) :: t()
+  @spec new(pos_integer() | [pos_integer()]) :: t()
   def new(values \\ []) do
-    Enum.reduce(values, %Sketch{}, &add(&2, &1))
-  end
-
-  @doc """
-  Merge two sketch instances with a common error rate.
-
-  ## Examples
-
-      iex> sketch_1 = Oban.Met.Sketch.new([1])
-      ...>
-      ...> Oban.Met.Sketch.new([2])
-      ...> |> Oban.Met.Sketch.merge(sketch_1)
-      ...> |> Oban.Met.Sketch.size()
-      2
-  """
-  @spec merge(t(), t()) :: t()
-  def merge(%Sketch{} = sketch_1, %Sketch{} = sketch_2) do
-    data = Map.merge(sketch_1.data, sketch_2.data, fn _, val_1, val_2 -> val_1 + val_2 end)
-
-    %Sketch{sketch_1 | data: data, size: sketch_1.size + sketch_2.size}
+    values
+    |> List.wrap()
+    |> Enum.reduce(%Sketch{}, &add(&2, &1))
   end
 
   @doc """
@@ -61,11 +49,11 @@ defmodule Oban.Met.Sketch do
 
   ## Examples
 
-      iex> Oban.Met.Sketch.new()
-      ...> |> Oban.Met.Sketch.add(1)
-      ...> |> Oban.Met.Sketch.add(2)
-      ...> |> Oban.Met.Sketch.add(3)
-      ...> |> Oban.Met.Sketch.size()
+      iex> Sketch.new()
+      ...> |> Sketch.add(1)
+      ...> |> Sketch.add(2)
+      ...> |> Sketch.add(3)
+      ...> |> Sketch.size()
       3
   """
   @spec add(t(), pos_integer()) :: t()
@@ -77,22 +65,41 @@ defmodule Oban.Met.Sketch do
   end
 
   @doc """
+  Merge two sketch instances with a common error rate.
+
+  ## Examples
+
+      iex> sketch_1 = Sketch.new([1])
+      ...>
+      ...> Sketch.new([2])
+      ...> |> Sketch.merge(sketch_1)
+      ...> |> Sketch.size()
+      2
+  """
+  @spec merge(t(), t()) :: t()
+  def merge(%Sketch{} = sketch_1, %Sketch{} = sketch_2) do
+    data = Map.merge(sketch_1.data, sketch_2.data, fn _, val_1, val_2 -> val_1 + val_2 end)
+
+    %Sketch{sketch_1 | data: data, size: sketch_1.size + sketch_2.size}
+  end
+
+  @doc """
   Compute the quantile value for a sketch.
 
   ## Examples
 
   Without any values:
 
-      iex> Oban.Met.Sketch.quantile(Oban.Met.Sketch.new(), 0.5)
+      iex> Sketch.quantile(Sketch.new(), 0.5)
       nil
 
   With recorded values:
 
-      iex> Oban.Met.Sketch.new()
-      ...> |> Oban.Met.Sketch.add(1)
-      ...> |> Oban.Met.Sketch.add(2)
-      ...> |> Oban.Met.Sketch.add(3)
-      ...> |> Oban.Met.Sketch.quantile(0.5)
+      iex> Sketch.new()
+      ...> |> Sketch.add(1)
+      ...> |> Sketch.add(2)
+      ...> |> Sketch.add(3)
+      ...> |> Sketch.quantile(0.5)
       ...> |> trunc()
       2
   """
@@ -121,11 +128,11 @@ defmodule Oban.Met.Sketch do
 
   ## Examples
 
-      iex> Oban.Met.Sketch.new()
-      ...> |> Oban.Met.Sketch.add(1)
-      ...> |> Oban.Met.Sketch.add(2)
-      ...> |> Oban.Met.Sketch.add(3)
-      ...> |> Oban.Met.Sketch.to_list()
+      iex> Sketch.new()
+      ...> |> Sketch.add(1)
+      ...> |> Sketch.add(2)
+      ...> |> Sketch.add(3)
+      ...> |> Sketch.to_list()
       ...> |> length()
       3
   """
@@ -143,11 +150,11 @@ defmodule Oban.Met.Sketch do
 
   ## Examples
 
-      iex> Oban.Met.Sketch.new([1, 2])
+      iex> Sketch.new([1, 2])
       ...> |> Jason.encode!()
       ...> |> Jason.decode!()
-      ...> |> Oban.Met.Sketch.from_map()
-      ...> |> Oban.Met.Sketch.quantile(1.0)
+      ...> |> Sketch.from_map()
+      ...> |> Sketch.quantile(1.0)
       ...> |> floor()
       2
   """

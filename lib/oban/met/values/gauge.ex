@@ -1,6 +1,6 @@
-defmodule Oban.Met.Gauge do
+defmodule Oban.Met.Values.Gauge do
   @moduledoc """
-  One or more non-negative integer values captured over time.
+  One or more non-negative integers captured over time.
   """
 
   alias __MODULE__, as: Gauge
@@ -15,16 +15,16 @@ defmodule Oban.Met.Gauge do
 
   ## Examples
 
-      iex> Oban.Met.Gauge.new(0)
-      ...> |> Oban.Met.Gauge.size()
+      iex> Gauge.new(0)
+      ...> |> Gauge.size()
       1
 
-      iex> Oban.Met.Gauge.new([0, 1, 2])
-      ...> |> Oban.Met.Gauge.size()
+      iex> Gauge.new([0, 1, 2])
+      ...> |> Gauge.size()
       3
 
-      iex> Oban.Met.Gauge.new([-1])
-      ...> |> Oban.Met.Gauge.first()
+      iex> Gauge.new([-1])
+      ...> |> Gauge.first()
       0
   """
   @spec new(non_neg_integer() | [non_neg_integer()]) :: t()
@@ -43,25 +43,25 @@ defmodule Oban.Met.Gauge do
   ## Examples
 
       iex> 1
-      ...> |> Oban.Met.Gauge.new()
-      ...> |> Oban.Met.Gauge.add(1)
-      ...> |> Oban.Met.Gauge.add(1)
-      ...> |> Oban.Met.Gauge.first()
+      ...> |> Gauge.new()
+      ...> |> Gauge.add(1)
+      ...> |> Gauge.add(1)
+      ...> |> Gauge.first()
       3
 
   Our gauge is specially tailored for tracking database counts, which may never be negative.
 
-      iex> Oban.Met.Gauge.new([1])
-      ...> |> Oban.Met.Gauge.add(-1)
-      ...> |> Oban.Met.Gauge.add(-1)
-      ...> |> Oban.Met.Gauge.first()
+      iex> Gauge.new([1])
+      ...> |> Gauge.add(-1)
+      ...> |> Gauge.add(-1)
+      ...> |> Gauge.first()
       0
   """
   @spec add(t(), integer()) :: t()
-  def add(%Gauge{data: [latest | rest]} = gauge, value) do
-    updated = max(0, latest + value)
+  def add(%Gauge{data: [head | tail]} = gauge, value) do
+    updated = max(0, head + value)
 
-    %Gauge{gauge | data: [updated | rest]}
+    %Gauge{gauge | data: [updated | tail]}
   end
 
   @doc """
@@ -69,14 +69,14 @@ defmodule Oban.Met.Gauge do
 
   ## Examples
 
-      iex> 1 |> Oban.Met.Gauge.new() |> Oban.Met.Gauge.first()
+      iex> 1 |> Gauge.new() |> Gauge.first()
       1
 
       iex> 1
-      ...> |> Oban.Met.Gauge.new()
-      ...> |> Oban.Met.Gauge.add(1)
-      ...> |> Oban.Met.Gauge.add(1)
-      ...> |> Oban.Met.Gauge.first()
+      ...> |> Gauge.new()
+      ...> |> Gauge.add(1)
+      ...> |> Gauge.add(1)
+      ...> |> Gauge.first()
       3
   """
   @spec first(t()) :: non_neg_integer()
@@ -89,20 +89,20 @@ defmodule Oban.Met.Gauge do
 
   Merging two gauges retains all values:
 
-      iex> gauge_1 = Oban.Met.Gauge.new(1)
-      ...> gauge_2 = Oban.Met.Gauge.new(2)
+      iex> gauge_1 = Gauge.new(1)
+      ...> gauge_2 = Gauge.new(2)
       ...> gauge_1
-      ...> |> Oban.Met.Gauge.merge(gauge_2)
-      ...> |> Oban.Met.Gauge.size()
+      ...> |> Gauge.merge(gauge_2)
+      ...> |> Gauge.size()
       2
 
   Merging two gauges retains the latest value from the first gauge:
 
-      iex> gauge_1 = Oban.Met.Gauge.new(1)
-      ...> gauge_2 = Oban.Met.Gauge.new(2)
+      iex> gauge_1 = Gauge.new(1)
+      ...> gauge_2 = Gauge.new(2)
       ...> gauge_1
-      ...> |> Oban.Met.Gauge.merge(gauge_2)
-      ...> |> Oban.Met.Gauge.first()
+      ...> |> Gauge.merge(gauge_2)
+      ...> |> Gauge.first()
       1
   """
   @spec merge(t(), t()) :: t()
@@ -117,19 +117,19 @@ defmodule Oban.Met.Gauge do
 
   With single values:
 
-      iex> Oban.Met.Gauge.quantile(Oban.Met.Gauge.new(0), 1.0)
+      iex> Gauge.quantile(Gauge.new(0), 1.0)
       0
 
-      iex> Oban.Met.Gauge.quantile(Oban.Met.Gauge.new(1), 1.0)
+      iex> Gauge.quantile(Gauge.new(1), 1.0)
       1
 
-  With multiple values
+  With multiple values:
 
-      iex> gauge = Oban.Met.Gauge.new(Enum.to_list(1..100))
+      iex> gauge = Gauge.new(Enum.to_list(1..100))
       ...>
-      ...> assert Oban.Met.Gauge.quantile(gauge, 0.0) == 1
-      ...> assert Oban.Met.Gauge.quantile(gauge, 0.5) == 50
-      ...> assert Oban.Met.Gauge.quantile(gauge, 1.0) == 100
+      ...> assert Gauge.quantile(gauge, 0.0) == 1
+      ...> assert Gauge.quantile(gauge, 0.5) == 50
+      ...> assert Gauge.quantile(gauge, 1.0) == 100
   """
   @spec quantile(t(), float()) :: integer()
   def quantile(%Gauge{data: [value]}, _), do: value
@@ -151,11 +151,11 @@ defmodule Oban.Met.Gauge do
 
   ## Examples
 
-      iex> Oban.Met.Gauge.new([1, 2])
+      iex> Gauge.new([1, 2])
       ...> |> Jason.encode!()
       ...> |> Jason.decode!()
-      ...> |> Oban.Met.Gauge.from_map()
-      ...> |> Oban.Met.Gauge.size()
+      ...> |> Gauge.from_map()
+      ...> |> Gauge.size()
       2
   """
   @spec from_map(%{optional(String.t()) => term()}) :: t()

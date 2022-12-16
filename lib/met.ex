@@ -74,6 +74,16 @@ defmodule Oban.Met do
   end
 
   @doc """
+  Get all stored values for a series without any filtering.
+  """
+  @spec lookup(oban_name(), series()) :: [term()]
+  def lookup(oban \\ Oban, series) do
+    oban
+    |> Registry.via(Recorder)
+    |> Recorder.lookup(to_string(series))
+  end
+
+  @doc """
   Get the latest values for a series, optionally subdivided by a label.
 
   Unlike queues and workers, states are static and constant, so they'll always show up in the
@@ -83,7 +93,7 @@ defmodule Oban.Met do
   def latest(oban \\ Oban, series, opts \\ []) do
     oban
     |> Registry.via(Recorder)
-    |> Recorder.latest(series, opts)
+    |> Recorder.latest(to_string(series), opts)
   end
 
   @doc """
@@ -93,7 +103,7 @@ defmodule Oban.Met do
   def timeslice(oban \\ Oban, series, opts \\ []) do
     oban
     |> Registry.via(Recorder)
-    |> Recorder.timeslice(series, opts)
+    |> Recorder.timeslice(to_string(series), opts)
   end
 
   # Callbacks

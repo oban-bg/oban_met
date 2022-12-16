@@ -2,7 +2,8 @@ defmodule Oban.Met.RecorderTest do
   use Oban.Met.Case, async: true
   use ExUnitProperties
 
-  alias Oban.Met.{Gauge, Recorder, Sketch, Value}
+  alias Oban.Met.{Recorder, Value}
+  alias Oban.Met.Values.{Count, Gauge, Sketch}
 
   @name Oban.Recorder
   @node "worker.1"
@@ -32,9 +33,10 @@ defmodule Oban.Met.RecorderTest do
 
     test "fetching metrics stored with pubsub notifications", %{pid: pid} do
       metrics = [
-        %{series: :a, node: @node, queue: :default, type: :gauge, value: Gauge.new([1])},
-        %{series: :b, node: @node, queue: :default, type: :sketch, value: Sketch.new([1])},
-        %{series: :c, node: @node, queue: :default, type: :delta, value: 1}
+        %{series: :a, node: @node, queue: :default, type: :gauge, value: Gauge.new(1)},
+        %{series: :b, node: @node, queue: :default, type: :count, value: Count.new(1)},
+        %{series: :c, node: @node, queue: :default, type: :sketch, value: Sketch.new(1)},
+        %{series: :d, node: @node, queue: :default, type: :delta, value: 1}
       ]
 
       payload =
@@ -48,8 +50,9 @@ defmodule Oban.Met.RecorderTest do
 
       Process.sleep(10)
 
-      assert [{{"a", labels, ^ts}, ^ts, :gauge, _}] = lookup(:a)
-      assert [{{"b", _label, ^ts}, ^ts, :sketch, _}] = lookup(:b)
+      assert [{{"a", :gauge, labels, ^ts}, ^ts, _}] = lookup(:a)
+      assert [{{"b", :count, _label, ^ts}, ^ts, _}] = lookup(:b)
+      assert [{{"c", :sketch, _label, ^ts}, ^ts, _}] = lookup(:c)
       assert %{"node" => @node, "queue" => "default"} = labels
     end
   end
@@ -74,7 +77,7 @@ defmodule Oban.Met.RecorderTest do
       store(:a, :sketch, [3, 4], %{"queue" => "alpha"}, timestamp: ts(-1))
       store(:a, :sketch, [3, 4], %{"queue" => "gamma"}, timestamp: ts(-1))
 
-      assert %{"all" => ntile} = latest(:a)
+      assert %{"all" => ntile} = latest(:a, type: :sketch)
 
       assert_in_delta ntile, 3.0, 0.2
     end
@@ -105,12 +108,12 @@ defmodule Oban.Met.RecorderTest do
   describe "timeslice/3" do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
-    test "slicing gauges by small periods" do
-      store(:a, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts(-1))
-      store(:a, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts(-2))
-      store(:a, :gauge, 4, %{"queue" => "alpha"}, timestamp: ts(-3))
-      store(:a, :gauge, 1, %{"queue" => "alpha"}, timestamp: ts(-4))
-      store(:a, :gauge, 5, %{"queue" => "alpha"}, timestamp: ts(-5))
+    test "slicing counts by small periods" do
+      store(:a, :count, 1, %{"queue" => "alpha"}, timestamp: ts(-1))
+      store(:a, :count, 1, %{"queue" => "alpha"}, timestamp: ts(-2))
+      store(:a, :count, 4, %{"queue" => "alpha"}, timestamp: ts(-3))
+      store(:a, :count, 1, %{"queue" => "alpha"}, timestamp: ts(-4))
+      store(:a, :count, 5, %{"queue" => "alpha"}, timestamp: ts(-5))
 
       assert [{ts, value, label} | _] = timeslice(:a)
 
@@ -119,50 +122,55 @@ defmodule Oban.Met.RecorderTest do
       refute label
 
       assert [5, 1, 4, 1, 1] = timeslice_values(:a)
-      assert [5, 4, 1] = timeslice_values(:a, by: 2)
-      assert [5, 4] = timeslice_values(:a, by: 3)
-      assert [5] = timeslice_values(:a, by: 6)
+      assert [5, 5, 2] = timeslice_values(:a, by: 2)
+      assert [6, 6] = timeslice_values(:a, by: 3)
+      assert [12] = timeslice_values(:a, by: 6)
     end
 
-    test "slicing gauges by groups" do
-      for value <- [1, 2], queue <- ~w(alpha gamma delta), ts <- [-1, -2] do
-        labels = %{"queue" => queue}
+    test "merging grouped counts through the lookback" do
+      store(:a, :count, 6, %{"queue" => "alpha", "node" => "a"}, timestamp: ts(-6))
+      store(:a, :count, 6, %{"queue" => "alpha", "node" => "b"}, timestamp: ts(-6))
+      store(:a, :count, 6, %{"queue" => "gamma", "node" => "a"}, timestamp: ts(-6))
 
-        store(:a, :gauge, value, labels, timestamp: ts(ts))
+      store(:a, :count, 4, %{"queue" => "alpha", "node" => "a"}, timestamp: ts(-4))
+      store(:a, :count, 4, %{"queue" => "alpha", "node" => "b"}, timestamp: ts(-4))
+      store(:a, :count, 4, %{"queue" => "gamma", "node" => "b"}, timestamp: ts(-4))
+
+      store(:a, :count, 2, %{"queue" => "alpha", "node" => "a"}, timestamp: ts(-2))
+      store(:a, :count, 2, %{"queue" => "alpha", "node" => "b"}, timestamp: ts(-2))
+      store(:a, :count, 2, %{"queue" => "gamma", "node" => "b"}, timestamp: ts(-2))
+
+      values_for = fn slices, group ->
+        slices
+        |> Enum.filter(&(elem(&1, 2) == group))
+        |> Enum.map(&elem(&1, 1))
       end
 
-      assert [{_, _, "alpha"}, {_, _, "alpha"} | _] = timeslice(:a, label: "queue")
+      slices = timeslice(:a, group: "queue", by: 1)
+
+      assert [12, 8, 4] = values_for.(slices, "alpha")
+      assert [6, 4, 2] = values_for.(slices, "gamma")
+
+      slices = timeslice(:a, group: "queue", by: 3)
+
+      assert [20, 4] = values_for.(slices, "alpha")
+      assert [10, 2] = values_for.(slices, "gamma")
     end
 
-    test "interpolating slices over the duration of the lookback" do
-      store(:a, :gauge, 6, %{"queue" => "alpha", "node" => "a"}, timestamp: ts(-6))
-      store(:a, :gauge, 6, %{"queue" => "alpha", "node" => "b"}, timestamp: ts(-6))
-      store(:a, :gauge, 6, %{"queue" => "gamma", "node" => "a"}, timestamp: ts(-6))
+    test "merging sketch data across labels for the same timestamp" do
+      store(:a, :sketch, [1], %{"queue" => "alpha", "node" => "a"}, timestamp: ts(-2))
+      store(:a, :sketch, [3], %{"queue" => "alpha", "node" => "b"}, timestamp: ts(-2))
+      store(:a, :sketch, [1], %{"queue" => "alpha", "node" => "a"}, timestamp: ts(-1))
+      store(:a, :sketch, [3], %{"queue" => "alpha", "node" => "b"}, timestamp: ts(-1))
 
-      store(:a, :gauge, 4, %{"queue" => "alpha", "node" => "a"}, timestamp: ts(-4))
-      store(:a, :gauge, 4, %{"queue" => "alpha", "node" => "b"}, timestamp: ts(-4))
-      store(:a, :gauge, 4, %{"queue" => "gamma", "node" => "b"}, timestamp: ts(-4))
+      assert [3, 3] = timeslice_values(:a, type: :sketch)
+    end
 
-      store(:a, :gauge, 2, %{"queue" => "alpha", "node" => "a"}, timestamp: ts(-2))
-      store(:a, :gauge, 2, %{"queue" => "alpha", "node" => "b"}, timestamp: ts(-2))
-      store(:a, :gauge, 2, %{"queue" => "gamma", "node" => "b"}, timestamp: ts(-2))
+    test "using counts over gauges with the same series name" do
+      store(:a, :count, 3, %{"queue" => "alpha"}, timestamp: ts(-1))
+      store(:a, :gauge, 0, %{"queue" => "alpha"}, timestamp: ts(-1))
 
-      slices = timeslice(:a, label: "queue", by: 1)
-
-      slices
-      |> Enum.chunk_by(&elem(&1, 2))
-      |> Enum.each(fn slice ->
-        timestamps = Enum.map(slice, &elem(&1, 0))
-
-        assert [1, 1, 1, 1] = Enum.zip_with([timestamps, tl(timestamps)], fn [x, y] -> y - x end)
-      end)
-
-      for label <- ~w(alpha gamma) do
-        assert [6, 6, 4, 4, 2] =
-                 slices
-                 |> Enum.filter(&(elem(&1, 2) == label))
-                 |> Enum.map(&elem(&1, 1))
-      end
+      assert [3] = timeslice_values(:a)
     end
   end
 
@@ -187,12 +195,12 @@ defmodule Oban.Met.RecorderTest do
 
         assert length(originals) ==
                  compacted
-                 |> Enum.map(fn {_, _, _, value} -> Value.size(value) end)
+                 |> Enum.map(fn {_, _, value} -> Value.size(value) end)
                  |> Enum.sum()
 
         get_queues = fn metrics ->
           metrics
-          |> Enum.map(&get_in(&1, [Access.elem(0), Access.elem(1), :queue]))
+          |> Enum.map(&get_in(&1, [Access.elem(0), Access.elem(2), :queue]))
           |> Enum.uniq()
           |> Enum.sort()
         end
@@ -238,10 +246,10 @@ defmodule Oban.Met.RecorderTest do
 
       compact([{5, 60}])
 
-      assert [6, 9] =
+      assert [9, 6] =
                :a
                |> lookup()
-               |> Enum.map(fn {_, _, _, sketch} -> Sketch.size(sketch) end)
+               |> Enum.map(fn {_, _, sketch} -> Sketch.size(sketch) end)
     end
 
     test "compacting metrics multiple times is idempotent" do
@@ -265,10 +273,10 @@ defmodule Oban.Met.RecorderTest do
 
       compact([{1, 60}, {1, 60}])
 
-      assert [:alpha, :gamma] =
+      assert [:gamma, :alpha] =
                :a
                |> lookup()
-               |> Enum.map(&get_in(&1, [Access.elem(0), Access.elem(1), :queue]))
+               |> Enum.map(&get_in(&1, [Access.elem(0), Access.elem(2), :queue]))
     end
 
     test "applying a delta after gauge compaction" do
@@ -316,7 +324,7 @@ defmodule Oban.Met.RecorderTest do
 
       assert 4 ==
                :b
-               |> latest()
+               |> latest(type: :sketch)
                |> Map.fetch!("all")
                |> round()
     end
@@ -335,6 +343,7 @@ defmodule Oban.Met.RecorderTest do
   defp store(series, type, value, labels, opts \\ []) do
     value =
       case type do
+        :count -> Count.new(value)
         :gauge -> Gauge.new(value)
         :sketch -> Sketch.new(value)
         :delta -> value

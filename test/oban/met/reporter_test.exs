@@ -4,14 +4,14 @@ defmodule Oban.Met.ReporterTest do
   import :telemetry, only: [execute: 3]
 
   alias Oban.{Job, Notifier}
-  alias Oban.Met.{Gauge, Repo, Reporter, Sketch}
+  alias Oban.Met.{Repo, Reporter}
 
   @name Oban.Reporter
 
   describe "checkpoints" do
     setup :start_supervised_oban
 
-    test "broadcasting current queue and state gauges", %{conf: conf} do
+    test "storing current queue and state gauges", %{conf: conf} do
       pid = start_supervised!({Reporter, conf: conf, name: @name})
 
       queues = ~w(alpha gamma delta)
@@ -32,7 +32,7 @@ defmodule Oban.Met.ReporterTest do
       assert length(metrics) == length(states) * length(queues)
 
       assert [:gauge] = for({%{type: type}, _} <- metrics, uniq: true, do: type)
-      assert [%Gauge{}] = for({_, value} <- metrics, uniq: true, do: value)
+      assert [1] = for({_, value} <- metrics, uniq: true, do: value)
     end
   end
 
@@ -48,8 +48,9 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert +3 == find_metric(metrics, series: :executing)
-      assert -3 == find_metric(metrics, series: :available)
+      assert +3 == find_metric(metrics, series: :executing, type: :count)
+      assert +3 == find_metric(metrics, series: :executing, type: :delta)
+      assert -3 == find_metric(metrics, series: :available, type: :delta)
     end
 
     test "capturing job stop and exception counts", %{conf: conf, pid: pid} do
@@ -65,12 +66,18 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert -6 = find_metric(metrics, series: :executing)
-      assert 1 = find_metric(metrics, series: :cancelled)
-      assert 2 = find_metric(metrics, series: :completed)
-      assert 1 = find_metric(metrics, series: :discarded)
-      assert 1 = find_metric(metrics, series: :retryable)
-      assert 1 = find_metric(metrics, series: :scheduled)
+      assert +1 = find_metric(metrics, series: :cancelled, type: :count)
+      assert +2 = find_metric(metrics, series: :completed, type: :count)
+      assert +1 = find_metric(metrics, series: :discarded, type: :count)
+      assert +1 = find_metric(metrics, series: :retryable, type: :count)
+      assert +1 = find_metric(metrics, series: :scheduled, type: :count)
+
+      assert -6 = find_metric(metrics, series: :executing, type: :delta)
+      assert +1 = find_metric(metrics, series: :cancelled, type: :delta)
+      assert +2 = find_metric(metrics, series: :completed, type: :delta)
+      assert +1 = find_metric(metrics, series: :discarded, type: :delta)
+      assert +1 = find_metric(metrics, series: :retryable, type: :delta)
+      assert +1 = find_metric(metrics, series: :scheduled, type: :delta)
     end
 
     test "capturing counts separately for every queue", %{conf: conf, pid: pid} do
@@ -83,8 +90,11 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert 2 == find_metric(metrics, series: :executing, queue: "alpha")
-      assert 1 == find_metric(metrics, series: :executing, queue: "gamma")
+      assert 2 == find_metric(metrics, series: :executing, queue: "alpha", type: :count)
+      assert 1 == find_metric(metrics, series: :executing, queue: "gamma", type: :count)
+
+      assert 2 == find_metric(metrics, series: :executing, queue: "alpha", type: :delta)
+      assert 1 == find_metric(metrics, series: :executing, queue: "gamma", type: :delta)
     end
 
     test "capturing job stop measurements", %{conf: conf, pid: pid} do
@@ -92,12 +102,11 @@ defmodule Oban.Met.ReporterTest do
 
       execute([:oban, :job, :stop], %{duration: 10_000, queue_time: 10_000}, meta)
       execute([:oban, :job, :stop], %{duration: 15_000, queue_time: 20_000}, meta)
-      execute([:oban, :job, :stop], %{duration: 10_000, queue_time: 10_000}, meta)
 
       metrics = Reporter.all_metrics(pid)
 
-      assert %Sketch{size: 3} = find_metric(metrics, series: :exec_time)
-      assert %Sketch{size: 3} = find_metric(metrics, series: :wait_time)
+      assert [15_000, 10_000] = find_metric(metrics, series: :exec_time)
+      assert [20_000, 10_000] = find_metric(metrics, series: :wait_time)
     end
 
     @tag :engine_events
@@ -111,9 +120,13 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert 1 == find_metric(metrics, series: :available, queue: "alpha")
-      assert 2 == find_metric(metrics, series: :available, queue: "gamma")
-      assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha")
+      assert 1 == find_metric(metrics, series: :available, queue: "alpha", type: :count)
+      assert 2 == find_metric(metrics, series: :available, queue: "gamma", type: :count)
+      assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha", type: :count)
+
+      assert 1 == find_metric(metrics, series: :available, queue: "alpha", type: :delta)
+      assert 2 == find_metric(metrics, series: :available, queue: "gamma", type: :delta)
+      assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha", type: :delta)
     end
 
     @tag :engine_events
@@ -132,10 +145,15 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert 1 == find_metric(metrics, series: :available, queue: "alpha")
-      assert 2 == find_metric(metrics, series: :available, queue: "gamma")
-      assert 1 == find_metric(metrics, series: :retryable, queue: "gamma")
-      assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha")
+      assert 1 == find_metric(metrics, series: :available, queue: "alpha", type: :count)
+      assert 2 == find_metric(metrics, series: :available, queue: "gamma", type: :count)
+      assert 1 == find_metric(metrics, series: :retryable, queue: "gamma", type: :count)
+      assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha", type: :count)
+
+      assert 1 == find_metric(metrics, series: :available, queue: "alpha", type: :delta)
+      assert 2 == find_metric(metrics, series: :available, queue: "gamma", type: :delta)
+      assert 1 == find_metric(metrics, series: :retryable, queue: "gamma", type: :delta)
+      assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha", type: :delta)
     end
 
     @tag :engine_events
@@ -155,13 +173,13 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert 2 == find_metric(metrics, series: :cancelled, queue: "alpha")
-      assert 2 == find_metric(metrics, series: :cancelled, queue: "gamma")
+      assert 2 == find_metric(metrics, series: :cancelled, queue: "alpha", type: :count)
+      assert 2 == find_metric(metrics, series: :cancelled, queue: "gamma", type: :count)
 
-      assert 0 == find_metric(metrics, series: :executing, queue: "alpha")
-      assert 0 == find_metric(metrics, series: :scheduled, queue: "alpha")
-      assert 0 == find_metric(metrics, series: :retryable, queue: "gamma")
-      assert 0 == find_metric(metrics, series: :available, queue: "gamma")
+      assert 0 == find_metric(metrics, series: :executing, queue: "alpha", type: :delta)
+      assert 0 == find_metric(metrics, series: :scheduled, queue: "alpha", type: :delta)
+      assert 0 == find_metric(metrics, series: :retryable, queue: "gamma", type: :delta)
+      assert 0 == find_metric(metrics, series: :available, queue: "gamma", type: :delta)
     end
 
     @tag :engine_events
@@ -181,13 +199,13 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert 2 == find_metric(metrics, series: :available, queue: "alpha")
-      assert 2 == find_metric(metrics, series: :available, queue: "gamma")
+      assert 2 == find_metric(metrics, series: :available, queue: "alpha", type: :count)
+      assert 2 == find_metric(metrics, series: :available, queue: "gamma", type: :count)
 
-      assert 0 == find_metric(metrics, series: :retryable, queue: "alpha")
-      assert 0 == find_metric(metrics, series: :retryable, queue: "alpha")
-      assert 0 == find_metric(metrics, series: :completed, queue: "gamma")
-      assert 0 == find_metric(metrics, series: :cancelled, queue: "gamma")
+      assert 0 == find_metric(metrics, series: :retryable, queue: "alpha", type: :delta)
+      assert 0 == find_metric(metrics, series: :retryable, queue: "alpha", type: :delta)
+      assert 0 == find_metric(metrics, series: :completed, queue: "gamma", type: :delta)
+      assert 0 == find_metric(metrics, series: :cancelled, queue: "gamma", type: :delta)
     end
 
     @tag :plugin_events
@@ -212,10 +230,10 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert 1 == find_metric(metrics, series: :completed, queue: "alpha")
-      assert 1 == find_metric(metrics, series: :cancelled, queue: "alpha")
-      assert 0 == find_metric(metrics, series: :discarded, queue: "alpha")
-      assert 0 == find_metric(metrics, series: :completed, queue: "gamma")
+      assert 1 == find_metric(metrics, series: :completed, queue: "alpha", type: :delta)
+      assert 1 == find_metric(metrics, series: :cancelled, queue: "alpha", type: :delta)
+      assert 0 == find_metric(metrics, series: :discarded, queue: "alpha", type: :delta)
+      assert 0 == find_metric(metrics, series: :completed, queue: "gamma", type: :delta)
     end
 
     @tag :plugin_events
@@ -237,12 +255,15 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha")
-      assert 0 == find_metric(metrics, series: :retryable, queue: "alpha")
-      assert 2 == find_metric(metrics, series: :available, queue: "alpha")
+      assert 2 == find_metric(metrics, series: :scheduled, queue: "alpha", type: :count)
+      assert 1 == find_metric(metrics, series: :retryable, queue: "alpha", type: :count)
 
-      assert 0 == find_metric(metrics, series: :scheduled, queue: "gamma")
-      assert 1 == find_metric(metrics, series: :available, queue: "gamma")
+      assert 1 == find_metric(metrics, series: :scheduled, queue: "alpha", type: :delta)
+      assert 0 == find_metric(metrics, series: :retryable, queue: "alpha", type: :delta)
+      assert 2 == find_metric(metrics, series: :available, queue: "alpha", type: :delta)
+
+      assert 0 == find_metric(metrics, series: :scheduled, queue: "gamma", type: :delta)
+      assert 1 == find_metric(metrics, series: :available, queue: "gamma", type: :delta)
     end
 
     @tag :plugin_events
@@ -271,12 +292,15 @@ defmodule Oban.Met.ReporterTest do
 
       metrics = Reporter.all_metrics(pid)
 
-      assert 1 == find_metric(metrics, series: :executing, queue: "alpha")
-      assert 1 == find_metric(metrics, series: :available, queue: "alpha")
-      assert 1 == find_metric(metrics, series: :discarded, queue: "alpha")
-      assert 0 == find_metric(metrics, series: :executing, queue: "gamma")
-      assert 1 == find_metric(metrics, series: :available, queue: "gamma")
-      assert 1 == find_metric(metrics, series: :discarded, queue: "gamma")
+      assert 1 == find_metric(metrics, series: :available, queue: "alpha", type: :count)
+      assert 1 == find_metric(metrics, series: :discarded, queue: "alpha", type: :count)
+
+      assert 1 == find_metric(metrics, series: :executing, queue: "alpha", type: :delta)
+      assert 1 == find_metric(metrics, series: :available, queue: "alpha", type: :delta)
+      assert 1 == find_metric(metrics, series: :discarded, queue: "alpha", type: :delta)
+      assert 0 == find_metric(metrics, series: :executing, queue: "gamma", type: :delta)
+      assert 1 == find_metric(metrics, series: :available, queue: "gamma", type: :delta)
+      assert 1 == find_metric(metrics, series: :discarded, queue: "gamma", type: :delta)
     end
   end
 
@@ -297,19 +321,17 @@ defmodule Oban.Met.ReporterTest do
 
       assert %{"name" => _, "metrics" => metrics} = payload
 
-      metrics = Map.new(metrics, fn map -> {map["series"], map} end)
+      metrics =
+        Map.new(metrics, fn map ->
+          {map["series"] <> "." <> map["type"], map}
+        end)
 
-      assert %{"queue" => "default", "type" => "delta", "value" => 0} = metrics["executing"]
-      assert %{"queue" => "default", "type" => "delta", "value" => -3} = metrics["available"]
-      assert %{"queue" => "default", "type" => "delta", "value" => 3} = metrics["completed"]
+      assert %{"queue" => "default", "value" => %{"data" => 3}} = metrics["executing.count"]
+      assert %{"queue" => "default", "value" => %{"data" => 3}} = metrics["completed.count"]
 
-      assert %{
-               "node" => "worker.1",
-               "queue" => "default",
-               "worker" => "Worker.A",
-               "type" => "sketch",
-               "value" => %{"size" => 3}
-             } = metrics["exec_time"]
+      assert %{"queue" => "default", "value" => +0} = metrics["executing.delta"]
+      assert %{"queue" => "default", "value" => -3} = metrics["available.delta"]
+      assert %{"queue" => "default", "value" => +3} = metrics["completed.delta"]
 
       assert %{
                "node" => "worker.1",
@@ -317,7 +339,15 @@ defmodule Oban.Met.ReporterTest do
                "worker" => "Worker.A",
                "type" => "sketch",
                "value" => %{"size" => 3}
-             } = metrics["wait_time"]
+             } = metrics["exec_time.sketch"]
+
+      assert %{
+               "node" => "worker.1",
+               "queue" => "default",
+               "worker" => "Worker.A",
+               "type" => "sketch",
+               "value" => %{"size" => 3}
+             } = metrics["wait_time.sketch"]
 
       assert [] = Reporter.all_metrics(pid)
     end
@@ -333,7 +363,7 @@ defmodule Oban.Met.ReporterTest do
     end
 
     case Enum.find(metrics, finder) do
-      {_label, count} -> count
+      {_label, value} -> value
       nil -> :error
     end
   end

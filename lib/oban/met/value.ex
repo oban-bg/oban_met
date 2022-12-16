@@ -24,14 +24,14 @@ defprotocol Oban.Met.Value do
   def size(struct)
 end
 
-for module <- [Oban.Met.Gauge, Oban.Met.Sketch] do
+for module <- [Oban.Met.Values.Count, Oban.Met.Values.Gauge, Oban.Met.Values.Sketch] do
   defimpl Oban.Met.Value, for: module do
-    defdelegate add(value, integer), to: module
+    defdelegate add(value, integer), to: @for
 
-    defdelegate merge(value_1, value_2), to: module
+    defdelegate merge(value_1, value_2), to: @for
 
-    defdelegate quantile(value, quantile), to: module
+    defdelegate quantile(value, quantile), to: @for
 
-    defdelegate size(value), to: module
+    defdelegate size(value), to: @for
   end
 end

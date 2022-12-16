@@ -8,7 +8,7 @@ defmodule Oban.Met.Reporter do
   import Ecto.Query, only: [group_by: 3, select: 3]
 
   alias __MODULE__, as: State
-  alias Oban.Met.{Gauge, Sketch}
+  alias Oban.Met.Values.{Count, Gauge, Sketch}
   alias Oban.{Job, Notifier, Repo}
 
   defstruct [
@@ -18,7 +18,7 @@ defmodule Oban.Met.Reporter do
     :report_timer,
     :table,
     checkpoint_interval: :timer.minutes(1),
-    report_interval: 750,
+    report_interval: :timer.seconds(1),
     retry_attempts: 5,
     retry_backoff: :timer.seconds(1)
   ]
@@ -96,7 +96,7 @@ defmodule Oban.Met.Reporter do
         |> select([j], {j.queue, j.state, count(j.id)})
 
       for {queue, state, count} <- Repo.all(conf, query, timeout: :infinity) do
-        :ets.insert(table, {%{series: state, type: :gauge, queue: queue}, Gauge.new(count)})
+        :ets.insert(table, {%{series: state, queue: queue, type: :gauge}, count})
       end
     end)
 
@@ -110,14 +110,21 @@ defmodule Oban.Met.Reporter do
       {_, _} -> 1
     end
 
+    to_value = fn
+      :count, value -> Count.new(value)
+      :delta, value -> value
+      :gauge, value -> Gauge.new(value)
+      :sketch, vals -> Sketch.new(vals)
+    end
+
     metrics =
       table
       |> :ets.tab2list()
       |> Enum.sort_by(sorting)
-      |> Enum.map(fn {labels, value} ->
+      |> Enum.map(fn {%{type: type} = labels, value} ->
         labels
         |> Map.put(:node, conf.node)
-        |> Map.put(:value, value)
+        |> Map.put(:value, to_value.(type, value))
       end)
 
     :ets.delete_all_objects(table)
@@ -168,10 +175,11 @@ defmodule Oban.Met.Reporter do
   def handle_event(_event, _measure, _meta, _conf), do: :ok
 
   @doc false
-  def track_event([:job, :start], _measure, meta, tab) do
+  def track_event([:job, :start], _measure, %{job: %{queue: queue}}, tab) do
     insert_or_update(tab, [
-      {%{series: :available, queue: meta.job.queue, type: :delta}, -1},
-      {%{series: :executing, queue: meta.job.queue, type: :delta}, 1}
+      {%{series: :available, queue: queue, type: :delta}, -1},
+      {%{series: :executing, queue: queue, type: :delta}, 1},
+      {%{series: :executing, queue: queue, type: :count}, 1}
     ])
   end
 
@@ -179,17 +187,23 @@ defmodule Oban.Met.Reporter do
     %{job: %{queue: queue, worker: worker}} = meta
     %{duration: exec_time, queue_time: wait_time} = measure
 
+    state = @trans_state[meta.state]
+
     insert_or_update(tab, [
       {%{series: :executing, queue: queue, type: :delta}, -1},
-      {%{series: @trans_state[meta.state], queue: queue, type: :delta}, 1},
+      {%{series: state, queue: queue, type: :delta}, 1},
+      {%{series: state, queue: queue, type: :count}, 1},
       {%{series: :exec_time, queue: queue, type: :sketch, worker: worker}, exec_time},
       {%{series: :wait_time, queue: queue, type: :sketch, worker: worker}, wait_time}
     ])
   end
 
   def track_event([:engine, :insert_job, _], _, %{job: job}, tab) do
+    series = String.to_existing_atom(job.state)
+
     insert_or_update(tab, [
-      {%{series: String.to_existing_atom(job.state), queue: job.queue, type: :delta}, 1}
+      {%{series: series, queue: job.queue, type: :delta}, 1},
+      {%{series: series, queue: job.queue, type: :count}, 1}
     ])
   end
 
@@ -197,8 +211,14 @@ defmodule Oban.Met.Reporter do
     objects =
       jobs
       |> Enum.group_by(&{&1.state, &1.queue})
-      |> Enum.map(fn {{state, queue}, jobs} ->
-        {%{series: String.to_existing_atom(state), queue: queue, type: :delta}, length(jobs)}
+      |> Enum.flat_map(fn {{state, queue}, jobs} ->
+        series = String.to_existing_atom(state)
+        value = length(jobs)
+
+        [
+          {%{series: series, queue: queue, type: :delta}, value},
+          {%{series: series, queue: queue, type: :count}, value}
+        ]
       end)
 
     insert_or_update(tab, objects)
@@ -258,6 +278,7 @@ defmodule Oban.Met.Reporter do
 
       [
         {%{series: new_series, queue: queue, type: :delta}, size},
+        {%{series: new_series, queue: queue, type: :count}, size},
         {%{series: old_series, queue: queue, type: :delta}, -size}
       ]
     end)
@@ -269,20 +290,16 @@ defmodule Oban.Met.Reporter do
 
   defp insert_or_update(table, {key, val}) do
     case :ets.lookup(table, key) do
-      [{%{type: :delta}, old}] ->
+      [{%{type: :sketch}, old}] ->
+        :ets.insert(table, {key, [val | old]})
+
+      [{^key, old}] ->
         :ets.insert(table, {key, old + val})
 
-      [{%{type: :sketch}, old}] ->
-        :ets.insert(table, {key, Sketch.add(old, val)})
-
       [] ->
-        case key do
-          %{type: :delta} ->
-            :ets.insert(table, {key, val})
+        val = if key.type == :sketch, do: [val], else: val
 
-          %{type: :sketch} ->
-            :ets.insert(table, {key, Sketch.new([val])})
-        end
+        :ets.insert(table, {key, val})
     end
   end
 

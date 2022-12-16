@@ -6,7 +6,7 @@ defmodule Oban.Met.Recorder do
   use GenServer
 
   alias __MODULE__, as: State
-  alias Oban.Met.{Gauge, Sketch, Value}
+  alias Oban.Met.{Value, Values.Count, Values.Gauge, Values.Sketch}
   alias Oban.Notifier
 
   @type name_or_table :: GenServer.name() | :ets.tid()
@@ -32,17 +32,20 @@ defmodule Oban.Met.Recorder do
     filters: [],
     group: nil,
     ntile: 1.0,
-    lookback: 60
+    lookback: 60,
+    type: :gauge
   ]
 
   @default_timeslice_opts [
+    by: 1,
     filters: [],
-    interpolate: true,
-    label: :any,
-    ntile: 1.0,
+    group: nil,
     lookback: 60,
-    by: 1
+    ntile: 1.0,
+    type: :count
   ]
+
+  @types ~w(count gauge delta sketch)a
 
   defstruct [
     :compact_timer,
@@ -68,9 +71,9 @@ defmodule Oban.Met.Recorder do
 
   @spec lookup(GenServer.name(), series()) :: [term()]
   def lookup(name, series) do
-    match = {{to_string(series), :_, :_}, :_, :_, :_}
+    match = {{to_string(series), :_, :_, :_}, :_, :_}
 
-    :ets.select(table(name), [{match, [], [:"$_"]}])
+    :ets.select_reverse(table(name), [{match, [], [:"$_"]}])
   end
 
   @spec latest(GenServer.name(), series(), Keyword.t()) :: %{optional(String.t()) => value()}
@@ -80,27 +83,25 @@ defmodule Oban.Met.Recorder do
     since = Keyword.fetch!(opts, :lookback)
     group = Keyword.fetch!(opts, :group)
     ntile = Keyword.fetch!(opts, :ntile)
-    stime = System.system_time(:second)
-    match = {{to_string(series), :"$1", :"$2"}, :_, :_, :_}
-    guard = filters_to_guards(opts[:filters], {:>=, :"$2", stime - since})
+    vtype = Keyword.fetch!(opts, :type)
 
     name
     |> table()
-    |> :ets.select_reverse([{match, [guard], [:"$_"]}])
-    |> Enum.dedup_by(fn {{_, labels, _}, _, _, _} -> labels end)
-    |> Enum.group_by(fn {{_, labels, _}, _, _, _} -> labels[group] end)
-    |> Map.new(fn {group, [{_, _, type, _} | _] = metrics} ->
+    |> select(series, vtype, since, opts[:filters])
+    |> Enum.dedup_by(fn {{_, _, labels, _}, _, _} -> labels end)
+    |> Enum.group_by(fn {{_, _, labels, _}, _, _} -> labels[group] end)
+    |> Map.new(fn {group, [{{_, type, _, _}, _, _} | _] = metrics} ->
       merged =
         case type do
           :gauge ->
             metrics
-            |> get_in([Access.all(), Access.elem(3)])
-            |> Enum.map(&Value.quantile(&1, 1.0))
+            |> get_in([Access.all(), Access.elem(2)])
+            |> Enum.map(&Gauge.first/1)
             |> Enum.sum()
 
           :sketch ->
             metrics
-            |> get_in([Access.all(), Access.elem(3)])
+            |> get_in([Access.all(), Access.elem(2)])
             |> Enum.reduce(&Sketch.merge/2)
             |> Sketch.quantile(ntile)
         end
@@ -113,81 +114,57 @@ defmodule Oban.Met.Recorder do
   def timeslice(name, series, opts \\ []) do
     opts = Keyword.validate!(opts, @default_timeslice_opts)
 
-    label = Keyword.fetch!(opts, :label)
+    group = Keyword.fetch!(opts, :group)
     ntile = Keyword.fetch!(opts, :ntile)
     since = Keyword.fetch!(opts, :lookback)
     slice = Keyword.fetch!(opts, :by)
+    vtype = Keyword.fetch!(opts, :type)
     stime = System.system_time(:second)
-
-    match = {{to_string(series), :"$1", :"$2"}, :_, :_, :_}
-    guard = filters_to_guards(opts[:filters], {:>=, :"$2", stime - since})
 
     name
     |> table()
-    |> :ets.select_reverse([{match, [guard], [:"$_"]}])
-    |> Enum.map(fn {{_, labels, ts}, _, _, value} -> {ts, value, labels[label]} end)
-    |> Enum.sort_by(fn {ts, _, label} -> {label, ts} end)
-    |> interpolate(slice)
-    |> Enum.chunk_by(fn {ts, _, label} -> {label, div(stime - ts - 1, slice)} end)
-    |> Enum.map(&merge_into_ntile(&1, ntile))
-  end
+    |> select(series, vtype, since, opts[:filters])
+    |> Enum.reduce(%{}, fn {{_, _, labels, ts}, _, value}, acc ->
+      label = labels[group]
+      chunk = div(stime - ts - 1, slice)
 
-  defp interpolate(list, step), do: interpolate(list, step, [])
-
-  defp interpolate([{cts, val, lab} = curr, {nts, _, lab} = next | tail], step, acc) do
-    hold =
-      if cts + step < nts do
-        Enum.map((nts - step)..(cts + step)//step, &{&1, val, lab})
-      else
-        []
-      end
-
-    interpolate([next | tail], step, [hold, curr | acc])
-  end
-
-  defp interpolate([head | tail], step, acc) do
-    interpolate(tail, step, [head | acc])
-  end
-
-  defp interpolate([], _step, acc) do
-    acc
-    |> List.flatten()
-    |> Enum.reverse()
+      Map.update(acc, {label, chunk}, value, &Value.merge(&1, value))
+    end)
+    |> Enum.sort_by(fn {{label, chunk}, _} -> {label, -chunk} end)
+    |> Enum.map(fn {{label, chunk}, value} ->
+      {chunk, Value.quantile(value, ntile), label}
+    end)
   end
 
   @doc false
-  def store(name, series, type, value, labels, opts \\ [])
-      when type in [:gauge, :delta, :sketch] do
-    name
-    |> table()
-    |> inner_store(series, type, value, labels, opts)
-  end
-
-  defp inner_store(table, series, type, value, labels, opts) do
+  def store(name, series, type, value, labels, opts \\ []) when type in @types do
     ts = Keyword.get(opts, :timestamp, System.system_time(:second))
 
+    name
+    |> table()
+    |> inner_store(series, type, value, labels, ts)
+  end
+
+  defp inner_store(table, series, type, value, labels, ts) do
     series = to_string(series)
 
-    case {type, get_latest(table, series, labels)} do
-      {_type, {{^series, ^labels, ^ts} = key, ^ts, ^type, old_value}} ->
-        :ets.insert(table, {key, ts, type, Value.merge(old_value, value)})
+    case {type, get_latest(table, series, type, labels)} do
+      {_type, {{^series, ^type, ^labels, ^ts} = key, ^ts, old_value}} ->
+        :ets.insert(table, {key, ts, Value.merge(old_value, value)})
 
-      {:delta, {{^series, ^labels, _max_ts}, _min_ts, :gauge, old_value}} ->
-        :ets.insert(table, {{series, labels, ts}, ts, :gauge, Value.add(old_value, value)})
+      {:delta, {{^series, :gauge, ^labels, _max_ts}, _min_ts, old_value}} ->
+        :ets.insert(table, {{series, :gauge, labels, ts}, ts, Gauge.add(old_value, value)})
 
       {:delta, nil} ->
-        :ets.insert(table, {{series, labels, ts}, ts, :gauge, Gauge.new(value)})
+        :ets.insert(table, {{series, :gauge, labels, ts}, ts, Gauge.new(value)})
 
-      {:gauge, _object} ->
-        :ets.insert(table, {{series, labels, ts}, ts, type, value})
-
-      {_type, _object} ->
-        :ets.insert(table, {{series, labels, ts}, ts, type, value})
+      {_other, _object} ->
+        :ets.insert(table, {{series, type, labels, ts}, ts, value})
     end
   end
 
-  defp get_latest(table, series, labels) do
-    match = {{series, labels, :_}, :_, :_, :_}
+  defp get_latest(table, series, type, labels) do
+    match = {{series, type, labels, :_}, :_, :_}
 
     case :ets.select_reverse(table, [{match, [], [:"$_"]}], 1) do
       {[object], _cont} -> object
@@ -208,14 +185,14 @@ defmodule Oban.Met.Recorder do
 
     Enum.reduce(periods, System.system_time(:second), fn {step, duration}, ts ->
       since = ts - duration
-      match = {{:_, :_, :"$1"}, :"$2", :_, :_}
+      match = {{:_, :_, :_, :"$1"}, :"$2", :_}
       guard = [{:andalso, {:>=, :"$2", since}, {:"=<", :"$1", ts}}]
 
       objects = :ets.select(table, [{match, guard, [:"$_"]}])
       _delete = :ets.select_delete(table, [{match, guard, [true]}])
 
       objects
-      |> Enum.chunk_by(fn {{ser, lab, max}, _, _, _} -> {ser, lab, div(ts - max - 1, step)} end)
+      |> Enum.chunk_by(fn {{ser, typ, lab, max}, _, _} -> {ser, typ, lab, div(ts - max - 1, step)} end)
       |> Enum.map(&compact_object/1)
       |> then(&:ets.insert(table, &1))
 
@@ -223,18 +200,18 @@ defmodule Oban.Met.Recorder do
     end)
   end
 
-  defp compact_object([{{series, labels, _}, _, type, _} | _] = metrics) do
+  defp compact_object([{{series, type, labels, _}, _, _} | _] = metrics) do
     {min_ts, max_ts} =
       metrics
-      |> Enum.flat_map(fn {{_, _, max_ts}, min_ts, _, _} -> [max_ts, min_ts] end)
+      |> Enum.flat_map(fn {{_, _, _, max_ts}, min_ts, _} -> [max_ts, min_ts] end)
       |> Enum.min_max()
 
     value =
       metrics
-      |> Enum.map(&elem(&1, 3))
+      |> Enum.map(&elem(&1, 2))
       |> Enum.reduce(&Value.merge/2)
 
-    {{series, labels, max_ts}, min_ts, type, value}
+    {{series, type, labels, max_ts}, min_ts, value}
   end
 
   defp delete_outdated(table, periods) do
@@ -242,7 +219,7 @@ defmodule Oban.Met.Recorder do
     maximum = Enum.reduce(periods, 0, fn {_, duration}, acc -> duration + acc end)
 
     since = systime - maximum
-    match = {{:_, :_, :"$1"}, :_, :_, :_}
+    match = {{:_, :_, :_, :"$1"}, :_, :_}
     guard = [{:<, :"$1", since}]
 
     :ets.select_delete(table, [{match, guard, [true]}])
@@ -273,18 +250,21 @@ defmodule Oban.Met.Recorder do
 
   @impl GenServer
   def handle_info({:notification, :gossip, %{"metrics" => metrics}}, %State{} = state) do
+    ts = System.system_time(:second)
+
     for %{"series" => series, "type" => type, "value" => value} = labels <- metrics do
       labels = Map.drop(labels, ["name", "type", "value"])
       type = String.to_existing_atom(type)
 
       value =
         case type do
+          :count -> Count.from_map(value)
           :gauge -> Gauge.from_map(value)
           :sketch -> Sketch.from_map(value)
           _ -> value
         end
 
-      inner_store(state.table, series, type, value, labels, [])
+      inner_store(state.table, series, type, value, labels, ts)
     end
 
     {:noreply, state}
@@ -334,6 +314,14 @@ defmodule Oban.Met.Recorder do
 
   # Fetching & Filtering
 
+  defp select(table, series, type, since, filters) do
+    stime = System.system_time(:second)
+    match = {{to_string(series), type, :"$1", :"$2"}, :_, :_}
+    guard = filters_to_guards(filters, {:>=, :"$2", stime - since})
+
+    :ets.select_reverse(table, [{match, [guard], [:"$_"]}])
+  end
+
   defp filters_to_guards(nil, base), do: base
 
   defp filters_to_guards(filters, base) do
@@ -346,11 +334,5 @@ defmodule Oban.Met.Recorder do
 
       {:andalso, and_guard, and_acc}
     end)
-  end
-
-  defp merge_into_ntile(metrics, ntile) do
-    metrics
-    |> Enum.reduce(fn {_, new, _}, {ts, acc, label} -> {ts, Value.merge(new, acc), label} end)
-    |> update_in([Access.elem(1)], &Value.quantile(&1, ntile))
   end
 end
