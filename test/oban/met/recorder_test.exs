@@ -2,7 +2,7 @@ defmodule Oban.Met.RecorderTest do
   use Oban.Met.Case, async: true
   use ExUnitProperties
 
-  alias Oban.Met.{Recorder, Value}
+  alias Oban.Met.Recorder
   alias Oban.Met.Values.{Count, Gauge, Sketch}
 
   @name Oban.Recorder
@@ -193,11 +193,6 @@ defmodule Oban.Met.RecorderTest do
       for {originals, compacted} <- [{originals_a, compacted_a}, {originals_b, compacted_b}] do
         assert length(originals) > length(compacted)
 
-        assert length(originals) ==
-                 compacted
-                 |> Enum.map(fn {_, _, value} -> Value.size(value) end)
-                 |> Enum.sum()
-
         get_queues = fn metrics ->
           metrics
           |> Enum.map(&get_in(&1, [Access.elem(0), Access.elem(2), :queue]))
@@ -221,7 +216,7 @@ defmodule Oban.Met.RecorderTest do
       assert [9, 9, 9] =
                :a
                |> lookup()
-               |> Enum.map(fn {{_key, _lab, max_ts}, min_ts, _, _} -> max_ts - min_ts end)
+               |> Enum.map(fn {{_key, _typ, _lab, max_ts}, min_ts, _} -> max_ts - min_ts end)
     end
 
     test "compacted values are separated by series and labels" do

@@ -32,7 +32,7 @@ defmodule Oban.Met.Recorder do
     filters: [],
     group: nil,
     ntile: 1.0,
-    lookback: 60,
+    lookback: 5,
     type: :gauge
   ]
 
@@ -89,24 +89,15 @@ defmodule Oban.Met.Recorder do
     |> table()
     |> select(series, vtype, since, opts[:filters])
     |> Enum.dedup_by(fn {{_, _, labels, _}, _, _} -> labels end)
-    |> Enum.group_by(fn {{_, _, labels, _}, _, _} -> labels[group] end)
-    |> Map.new(fn {group, [{{_, type, _, _}, _, _} | _] = metrics} ->
+    |> Enum.group_by(fn {{_, _, labels, _}, _, _} -> labels[group] || "all" end)
+    |> Map.new(fn {group, metrics} ->
       merged =
-        case type do
-          :gauge ->
-            metrics
-            |> get_in([Access.all(), Access.elem(2)])
-            |> Enum.map(&Gauge.first/1)
-            |> Enum.sum()
+        metrics
+        |> get_in([Access.all(), Access.elem(2)])
+        |> Enum.reduce(&Value.merge/2)
+        |> Value.quantile(ntile)
 
-          :sketch ->
-            metrics
-            |> get_in([Access.all(), Access.elem(2)])
-            |> Enum.reduce(&Sketch.merge/2)
-            |> Sketch.quantile(ntile)
-        end
-
-      {group || "all", merged}
+      {group, merged}
     end)
   end
 
@@ -147,19 +138,20 @@ defmodule Oban.Met.Recorder do
 
   defp inner_store(table, series, type, value, labels, ts) do
     series = to_string(series)
+    lookup = if type == :delta, do: :gauge, else: type
 
-    case {type, get_latest(table, series, type, labels)} do
-      {_type, {{^series, ^type, ^labels, ^ts} = key, ^ts, old_value}} ->
-        :ets.insert(table, {key, ts, Value.merge(old_value, value)})
-
+    case {type, get_latest(table, series, lookup, labels)} do
       {:delta, {{^series, :gauge, ^labels, _max_ts}, _min_ts, old_value}} ->
         :ets.insert(table, {{series, :gauge, labels, ts}, ts, Gauge.add(old_value, value)})
 
       {:delta, nil} ->
         :ets.insert(table, {{series, :gauge, labels, ts}, ts, Gauge.new(value)})
 
+      {_type, {{^series, ^lookup, ^labels, ^ts} = key, ^ts, old_value}} ->
+        :ets.insert(table, {key, ts, Value.merge(old_value, value)})
+
       {_other, _object} ->
-        :ets.insert(table, {{series, type, labels, ts}, ts, value})
+        :ets.insert(table, {{series, lookup, labels, ts}, ts, value})
     end
   end
 
@@ -209,7 +201,7 @@ defmodule Oban.Met.Recorder do
     value =
       metrics
       |> Enum.map(&elem(&1, 2))
-      |> Enum.reduce(&Value.merge/2)
+      |> Enum.reduce(&Value.compact/2)
 
     {{series, type, labels, max_ts}, min_ts, value}
   end

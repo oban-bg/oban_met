@@ -44,6 +44,21 @@ defmodule Oban.Met.Values.Count do
   end
 
   @doc """
+  Compact two counts into one, adding the values.
+
+  ## Examples
+
+  Compacting two counts adds the values:
+
+      iex> count_1 = Count.new(1)
+      ...> count_2 = Count.new(2)
+      ...> Count.compact(count_1, count_2)
+      %Count{data: 3}
+  """
+  @spec compact(t(), t()) :: t()
+  def compact(count_1, count_2), do: merge(count_1, count_2)
+
+  @doc """
   Merges two counts into a one.
 
   ## Examples
@@ -75,10 +90,6 @@ defmodule Oban.Met.Values.Count do
   """
   @spec quantile(t(), float()) :: non_neg_integer()
   def quantile(%Count{data: data}, _), do: data
-
-  @doc false
-  @spec size(t()) :: non_neg_integer()
-  def size(%Count{}), do: 1
 
   @doc """
   Initialize a count struct from a stringified map, e.g. encoded JSON.
