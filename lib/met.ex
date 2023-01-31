@@ -8,8 +8,6 @@ defmodule Oban.Met do
   alias Oban.Met.{Examiner, Recorder, Reporter, Value}
   alias Oban.Registry
 
-  @type oban_name :: term()
-
   @type counts :: %{optional(String.t()) => non_neg_integer()}
   @type sub_counts :: %{optional(String.t()) => non_neg_integer() | counts()}
 
@@ -74,9 +72,31 @@ defmodule Oban.Met do
   end
 
   @doc """
+  Get all stored, unique values for a particular label.
+
+  ## Examples
+
+  Get all known queues:
+
+      Oban.Met.labels("queue")
+      ~w(alpha gamma delta)
+
+  Get all known workers:
+
+      Oban.Met.labels("worker")
+      ~w(MyApp.Worker MyApp.OtherWorker)
+  """
+  @spec labels(Oban.name(), label()) :: [label()]
+  def labels(oban \\ Oban, label) do
+    oban
+    |> Registry.via(Recorder)
+    |> Recorder.labels(to_string(label))
+  end
+
+  @doc """
   Get all stored values for a series without any filtering.
   """
-  @spec lookup(oban_name(), series()) :: [term()]
+  @spec lookup(Oban.name(), series()) :: [term()]
   def lookup(oban \\ Oban, series) do
     oban
     |> Registry.via(Recorder)
@@ -89,7 +109,7 @@ defmodule Oban.Met do
   Unlike queues and workers, states are static and constant, so they'll always show up in the
   counts or subdivision maps.
   """
-  @spec latest(oban_name(), series()) :: counts() | sub_counts()
+  @spec latest(Oban.name(), series()) :: counts() | sub_counts()
   def latest(oban \\ Oban, series, opts \\ []) do
     oban
     |> Registry.via(Recorder)
@@ -99,7 +119,7 @@ defmodule Oban.Met do
   @doc """
   Summarize a series of data with an aggregate over a configurable window of time.
   """
-  @spec timeslice(oban_name(), series(), timeslice_opts()) :: [{ts(), value(), label()}]
+  @spec timeslice(Oban.name(), series(), timeslice_opts()) :: [{ts(), value(), label()}]
   def timeslice(oban \\ Oban, series, opts \\ []) do
     oban
     |> Registry.via(Recorder)

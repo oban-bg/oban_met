@@ -57,6 +57,22 @@ defmodule Oban.Met.RecorderTest do
     end
   end
 
+  describe "labels/2" do
+    setup [:start_supervised_oban, :start_supervised_recorder]
+
+    test "fetching all values for a particular label" do
+      store(:a, :gauge, 3, %{"queue" => "alpha"}, timestamp: ts())
+      store(:b, :gauge, 3, %{"queue" => "gamma"}, timestamp: ts())
+      store(:c, :gauge, 3, %{"queue" => "delta"}, timestamp: ts())
+      store(:d, :gauge, 3, %{"queue" => "delta"}, timestamp: ts())
+      store(:e, :gauge, 3, %{"other" => "omega"}, timestamp: ts())
+
+      assert ~w(alpha delta gamma) = Recorder.labels(@name, "queue")
+      assert ~w(omega) = Recorder.labels(@name, "other")
+      assert [] = Recorder.labels(@name, "unknown")
+    end
+  end
+
   describe "latest/3" do
     setup [:start_supervised_oban, :start_supervised_recorder]
 

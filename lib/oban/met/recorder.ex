@@ -76,6 +76,18 @@ defmodule Oban.Met.Recorder do
     :ets.select_reverse(table(name), [{match, [], [:"$_"]}])
   end
 
+  @spec labels(GenServer.name(), label()) :: [label()]
+  def labels(name, label) when is_binary(label) do
+    match = {{:_, :_, :"$1", :_}, :_, :_}
+    guard = [{:is_map_key, label, :"$1"}]
+    value = [{:map_get, label, :"$1"}]
+
+    name
+    |> table()
+    |> :ets.select([{match, guard, value}])
+    |> :lists.usort()
+  end
+
   @spec latest(GenServer.name(), series(), Keyword.t()) :: %{optional(String.t()) => value()}
   def latest(name, series, opts \\ []) do
     opts = Keyword.validate!(opts, @default_latest_opts)
