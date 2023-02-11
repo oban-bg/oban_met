@@ -119,7 +119,7 @@ defmodule Oban.Met.Reporter do
 
     metrics =
       table
-      |> :ets.tab2list()
+      |> take_safe()
       |> Enum.sort_by(sorting)
       |> Enum.map(fn {%{type: type} = labels, value} ->
         labels
@@ -127,11 +127,25 @@ defmodule Oban.Met.Reporter do
         |> Map.put(:value, to_value.(type, value))
       end)
 
-    :ets.delete_all_objects(table)
-
     Notifier.notify(conf, :gossip, %{name: inspect(conf.name), metrics: metrics})
 
     {:noreply, schedule_report(state)}
+  end
+
+  defp take_safe(table) do
+    table
+    |> tap(&:ets.safe_fixtable(&1, true))
+    |> take_safe(:ets.first(table), [])
+  after
+    :ets.safe_fixtable(table, false)
+  end
+
+  defp take_safe(_table, :"$end_of_table", acc), do: acc
+
+  defp take_safe(table, key, acc) do
+    [object] = :ets.take(table, key)
+
+    take_safe(table, :ets.next(table, key), [object | acc])
   end
 
   @impl GenServer
@@ -288,19 +302,22 @@ defmodule Oban.Met.Reporter do
     for object <- objects, do: insert_or_update(table, object)
   end
 
-  defp insert_or_update(table, {key, val}) do
+  defp insert_or_update(table, {%{type: :sketch} = key, val}) do
     case :ets.lookup(table, key) do
-      [{%{type: :sketch}, old}] ->
+      [{^key, old}] ->
         :ets.insert(table, {key, [val | old]})
 
-      [{^key, old}] ->
-        :ets.insert(table, {key, old + val})
-
       [] ->
-        val = if key.type == :sketch, do: [val], else: val
-
-        :ets.insert(table, {key, val})
+        :ets.insert(table, {key, [val]})
     end
+  end
+
+  defp insert_or_update(table, {%{type: :gauge} = key, val}) do
+    :ets.insert(table, {key, val})
+  end
+
+  defp insert_or_update(table, {key, val}) do
+    :ets.update_counter(table, key, {2, val}, {key, 0})
   end
 
   # Scheduling
