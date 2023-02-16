@@ -105,29 +105,19 @@ defmodule Oban.Met.Reporter do
 
   @impl GenServer
   def handle_info(:report, %State{conf: conf, table: table} = state) do
-    sorting = fn
-      {%{type: :gauge}, _} -> 0
-      {_, _} -> 1
-    end
-
-    to_value = fn
-      :count, value -> Count.new(value)
-      :delta, value -> value
-      :gauge, value -> Gauge.new(value)
-      :sketch, vals -> Sketch.new(vals)
-    end
-
     metrics =
       table
       |> take_safe()
-      |> Enum.sort_by(sorting)
-      |> Enum.map(fn {%{type: type} = labels, value} ->
-        labels
-        |> Map.put(:node, conf.node)
-        |> Map.put(:value, to_value.(type, value))
-      end)
+      |> Enum.sort_by(&if &1.type == :gauge, do: 0, else: 1)
 
-    Notifier.notify(conf, :gossip, %{name: inspect(conf.name), metrics: metrics})
+    payload = %{
+      metrics: metrics,
+      name: inspect(conf.name),
+      node: conf.node,
+      time: System.system_time(:second)
+    }
+
+    Notifier.notify(conf, :gossip, payload)
 
     {:noreply, schedule_report(state)}
   end
@@ -143,9 +133,17 @@ defmodule Oban.Met.Reporter do
   defp take_safe(_table, :"$end_of_table", acc), do: acc
 
   defp take_safe(table, key, acc) do
-    [object] = :ets.take(table, key)
+    [{labels, value}] = :ets.take(table, key)
 
-    take_safe(table, :ets.next(table, key), [object | acc])
+    value =
+      case key do
+        %{type: :count} -> Count.new(value)
+        %{type: :delta} -> value
+        %{type: :gauge} -> Gauge.new(value)
+        %{type: :sketch} -> Sketch.new(value)
+      end
+
+    take_safe(table, :ets.next(table, key), [Map.put(labels, :value, value) | acc])
   end
 
   @impl GenServer

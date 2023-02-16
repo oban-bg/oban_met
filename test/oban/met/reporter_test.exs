@@ -319,7 +319,8 @@ defmodule Oban.Met.ReporterTest do
 
       assert_receive {:notification, :gossip, payload}
 
-      assert %{"name" => _, "metrics" => metrics} = payload
+      assert %{"name" => _, "node" => "worker.1"} = payload
+      assert %{"metrics" => metrics, "time" => _} = payload
 
       metrics =
         Map.new(metrics, fn map ->
@@ -334,7 +335,6 @@ defmodule Oban.Met.ReporterTest do
       assert %{"queue" => "default", "value" => +3} = metrics["completed.delta"]
 
       assert %{
-               "node" => "worker.1",
                "queue" => "default",
                "worker" => "Worker.A",
                "type" => "sketch",
@@ -342,7 +342,6 @@ defmodule Oban.Met.ReporterTest do
              } = metrics["exec_time.sketch"]
 
       assert %{
-               "node" => "worker.1",
                "queue" => "default",
                "worker" => "Worker.A",
                "type" => "sketch",

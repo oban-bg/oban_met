@@ -17,16 +17,7 @@ defmodule Oban.Met.Recorder do
   @type ts :: integer()
   @type period :: {pos_integer(), pos_integer()}
 
-  @periods [
-    # 1s for 2m
-    {1, 120},
-    # 5s for 10m
-    {5, 600},
-    # 60s for 120m
-    {60, 7_200},
-    # 5m for 1d
-    {300, 86_400}
-  ]
+  @periods [{1, 120}, {5, 600}, {60, 7_200}]
 
   @default_latest_opts [
     filters: [],
@@ -141,67 +132,14 @@ defmodule Oban.Met.Recorder do
 
   @doc false
   def store(name, series, type, value, labels, opts \\ []) when type in @types do
-    ts = Keyword.get(opts, :timestamp, System.system_time(:second))
+    time = Keyword.get(opts, :time, System.system_time(:second))
 
-    name
-    |> table()
-    |> inner_store(series, type, value, labels, ts)
-  end
-
-  defp inner_store(table, series, type, value, labels, ts) do
-    series = to_string(series)
-    lookup = if type == :delta, do: :gauge, else: type
-
-    case {type, get_latest(table, series, lookup, labels)} do
-      {:delta, {{^series, :gauge, ^labels, _max_ts}, _min_ts, old_value}} ->
-        :ets.insert(table, {{series, :gauge, labels, ts}, ts, Gauge.add(old_value, value)})
-
-      {:delta, nil} ->
-        :ets.insert(table, {{series, :gauge, labels, ts}, ts, Gauge.new(value)})
-
-      {_type, {{^series, ^lookup, ^labels, ^ts} = key, ^ts, old_value}} ->
-        :ets.insert(table, {key, ts, Value.merge(old_value, value)})
-
-      {_other, _object} ->
-        :ets.insert(table, {{series, lookup, labels, ts}, ts, value})
-    end
-  end
-
-  defp get_latest(table, series, type, labels) do
-    match = {{series, type, labels, :_}, :_, :_}
-
-    case :ets.select_reverse(table, [{match, [], [:"$_"]}], 1) do
-      {[object], _cont} -> object
-      _ -> nil
-    end
+    GenServer.call(name, {:store, {series, type, value, labels, time}})
   end
 
   @doc false
   def compact(name, periods) when is_list(periods) do
-    name
-    |> table()
-    |> inner_compact(periods)
-  end
-
-  @doc false
-  def inner_compact(table, periods) do
-    delete_outdated(table, periods)
-
-    Enum.reduce(periods, System.system_time(:second), fn {step, duration}, ts ->
-      since = ts - duration
-      match = {{:_, :_, :_, :"$1"}, :"$2", :_}
-      guard = [{:andalso, {:>=, :"$2", since}, {:"=<", :"$1", ts}}]
-
-      objects = :ets.select(table, [{match, guard, [:"$_"]}])
-      _delete = :ets.select_delete(table, [{match, guard, [true]}])
-
-      objects
-      |> Enum.chunk_by(fn {{ser, typ, lab, max}, _, _} -> {ser, typ, lab, div(ts - max - 1, step)} end)
-      |> Enum.map(&compact_object/1)
-      |> then(&:ets.insert(table, &1))
-
-      since
-    end)
+    GenServer.call(name, {:compact, periods})
   end
 
   defp compact_object([{{series, type, labels, _}, _, _} | _] = metrics) do
@@ -236,16 +174,16 @@ defmodule Oban.Met.Recorder do
     table =
       :ets.new(:metrics, [
         :ordered_set,
-        :public,
-        read_concurrency: true,
-        write_concurrency: true
+        :protected,
+        read_concurrency: true
       ])
 
     state =
       State
       |> struct!(Keyword.put(opts, :table, table))
-      |> subscribe_gossip()
       |> schedule_compact()
+
+    Notifier.listen(state.conf.name, [:gossip])
 
     Registry.register(Oban.Registry, state.name, table)
 
@@ -253,12 +191,31 @@ defmodule Oban.Met.Recorder do
   end
 
   @impl GenServer
-  def handle_info({:notification, :gossip, %{"metrics" => metrics}}, %State{} = state) do
-    ts = System.system_time(:second)
+  def handle_call({:store, params}, _from, %State{table: table} = state) do
+    {series, type, value, labels, time} = params
+
+    inner_store(table, series, type, value, labels, time)
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:compact, periods}, _from, %State{table: table} = state) do
+    inner_compact(table, periods)
+
+    {:reply, :ok, state}
+  end
+
+  @impl GenServer
+  def handle_info({:notification, :gossip, %{"metrics" => _} = payload}, %State{} = state) do
+    %{"metrics" => metrics, "node" => node, "time" => time} = payload
 
     for %{"series" => series, "type" => type, "value" => value} = labels <- metrics do
-      labels = Map.drop(labels, ["name", "type", "value"])
       type = String.to_existing_atom(type)
+
+      labels =
+        labels
+        |> Map.drop(["type", "value"])
+        |> Map.put("node", node)
 
       value =
         case type do
@@ -268,7 +225,7 @@ defmodule Oban.Met.Recorder do
           _ -> value
         end
 
-      inner_store(state.table, series, type, value, labels, ts)
+      inner_store(state.table, series, type, value, labels, time)
     end
 
     {:noreply, state}
@@ -279,12 +236,12 @@ defmodule Oban.Met.Recorder do
   end
 
   def handle_info(:compact, %State{compact_periods: periods, table: table} = state) do
-    Task.start(__MODULE__, :inner_compact, [table, periods])
+    inner_compact(table, periods)
 
     {:noreply, schedule_compact(state)}
   end
 
-  # Table Meta
+  # Table
 
   defp table(name) do
     [{_pid, table}] = Registry.lookup(Oban.Registry, name)
@@ -292,13 +249,55 @@ defmodule Oban.Met.Recorder do
     table
   end
 
-  # Scheduling
+  defp inner_store(table, series, type, value, labels, ts) do
+    series = to_string(series)
+    lookup = if type == :delta, do: :gauge, else: type
 
-  defp subscribe_gossip(%State{conf: conf} = state) do
-    Notifier.listen(conf.name, [:gossip])
+    case {type, get_latest(table, series, lookup, labels)} do
+      {:delta, {{^series, :gauge, ^labels, _max_ts}, _min_ts, old_value}} ->
+        :ets.insert(table, {{series, :gauge, labels, ts}, ts, Gauge.add(old_value, value)})
 
-    state
+      {:delta, nil} ->
+        :ets.insert(table, {{series, :gauge, labels, ts}, ts, Gauge.new(value)})
+
+      {_type, {{^series, ^lookup, ^labels, ^ts} = key, ^ts, old_value}} ->
+        :ets.insert(table, {key, ts, Value.merge(old_value, value)})
+
+      {_other, _object} ->
+        :ets.insert(table, {{series, lookup, labels, ts}, ts, value})
+    end
   end
+
+  defp get_latest(table, series, type, labels) do
+    match = {{series, type, labels, :_}, :_, :_}
+
+    case :ets.select_reverse(table, [{match, [], [:"$_"]}], 1) do
+      {[object], _cont} -> object
+      _ -> nil
+    end
+  end
+
+  defp inner_compact(table, periods) do
+    delete_outdated(table, periods)
+
+    Enum.reduce(periods, System.system_time(:second), fn {step, duration}, ts ->
+      since = ts - duration
+      match = {{:_, :_, :_, :"$1"}, :"$2", :_}
+      guard = [{:andalso, {:>=, :"$2", since}, {:"=<", :"$1", ts}}]
+
+      objects = :ets.select(table, [{match, guard, [:"$_"]}])
+      _delete = :ets.select_delete(table, [{match, guard, [true]}])
+
+      objects
+      |> Enum.chunk_by(fn {{ser, typ, lab, max}, _, _} -> {ser, typ, lab, div(ts - max - 1, step)} end)
+      |> Enum.map(&compact_object/1)
+      |> then(&:ets.insert(table, &1))
+
+      since
+    end)
+  end
+
+  # Scheduling
 
   defp schedule_compact(state) do
     time = Time.utc_now()
