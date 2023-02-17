@@ -106,7 +106,7 @@
           {Credo.Check.Design.DuplicatedCode, []},
           {Credo.Check.Design.SkipTestWithoutComment, []},
           {Credo.Check.Readability.AliasAs, false},
-          {Credo.Check.Readability.BlockPipe, []},
+          {Credo.Check.Readability.BlockPipe, false},
           {Credo.Check.Readability.ImplTrue, []},
           {Credo.Check.Readability.MultiAlias, false},
           {Credo.Check.Readability.NestedFunctionCalls, []},

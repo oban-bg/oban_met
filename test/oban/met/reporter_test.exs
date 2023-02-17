@@ -269,21 +269,21 @@ defmodule Oban.Met.ReporterTest do
     @tag :plugin_events
     test "capturing rescued and discarded counts", %{conf: conf, pid: pid} do
       insert_tracked(conf, [
-        %Job{queue: "alpha", state: "executing"},
-        %Job{queue: "alpha", state: "executing"},
-        %Job{queue: "alpha", state: "executing"},
-        %Job{queue: "gamma", state: "executing"},
-        %Job{queue: "gamma", state: "executing"}
+        %Job{queue: "alpha", state: "executing", worker: "A"},
+        %Job{queue: "alpha", state: "executing", worker: "A"},
+        %Job{queue: "alpha", state: "executing", worker: "A"},
+        %Job{queue: "gamma", state: "executing", worker: "A"},
+        %Job{queue: "gamma", state: "executing", worker: "A"}
       ])
 
       rescued_jobs = [
-        %Job{queue: "alpha", state: "executing"},
-        %Job{queue: "gamma", state: "executing"}
+        %Job{queue: "alpha", state: "executing", worker: "A"},
+        %Job{queue: "gamma", state: "executing", worker: "A"}
       ]
 
       discarded_jobs = [
-        %Job{queue: "alpha", state: "executing"},
-        %Job{queue: "gamma", state: "executing"}
+        %Job{queue: "alpha", state: "executing", worker: "A"},
+        %Job{queue: "gamma", state: "executing", worker: "A"}
       ]
 
       meta = %{conf: conf, rescued_jobs: rescued_jobs, discarded_jobs: discarded_jobs}
@@ -301,6 +301,10 @@ defmodule Oban.Met.ReporterTest do
       assert 0 == find_metric(metrics, series: :executing, queue: "gamma", type: :delta)
       assert 1 == find_metric(metrics, series: :available, queue: "gamma", type: :delta)
       assert 1 == find_metric(metrics, series: :discarded, queue: "gamma", type: :delta)
+
+      assert 3 == find_metric(metrics, series: :executing, worker: "A", type: :count)
+      assert 1 == find_metric(metrics, series: :available, worker: "A", type: :count)
+      assert 1 == find_metric(metrics, series: :discarded, worker: "A", type: :count)
     end
   end
 
@@ -361,7 +365,10 @@ defmodule Oban.Met.ReporterTest do
       Enum.all?(fields, fn {key, val} -> Map.get(labels, key) == val end)
     end
 
-    case Enum.find(metrics, finder) do
+    metrics
+    |> Enum.sort()
+    |> Enum.find(finder)
+    |> case do
       {_label, value} -> value
       nil -> :error
     end

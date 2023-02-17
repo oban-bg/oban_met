@@ -187,11 +187,13 @@ defmodule Oban.Met.Reporter do
   def handle_event(_event, _measure, _meta, _conf), do: :ok
 
   @doc false
-  def track_event([:job, :start], _measure, %{job: %{queue: queue}}, tab) do
+  def track_event([:job, :start], _measure, meta, tab) do
+    %{job: %{queue: queue, worker: worker}} = meta
+
     insert_or_update(tab, [
-      {%{series: :available, queue: queue, type: :delta}, -1},
-      {%{series: :executing, queue: queue, type: :delta}, 1},
-      {%{series: :executing, queue: queue, type: :count}, 1}
+      {%{series: :available, queue: queue, type: :delta, worker: worker}, -1},
+      {%{series: :executing, queue: queue, type: :delta, worker: worker}, 1},
+      {%{series: :executing, queue: queue, type: :count, worker: worker}, 1}
     ])
   end
 
@@ -202,34 +204,36 @@ defmodule Oban.Met.Reporter do
     state = @trans_state[meta.state]
 
     insert_or_update(tab, [
-      {%{series: :executing, queue: queue, type: :delta}, -1},
-      {%{series: state, queue: queue, type: :delta}, 1},
-      {%{series: state, queue: queue, type: :count}, 1},
+      {%{series: :executing, queue: queue, type: :delta, worker: worker}, -1},
+      {%{series: state, queue: queue, type: :delta, worker: worker}, 1},
+      {%{series: state, queue: queue, type: :count, worker: worker}, 1},
       {%{series: :exec_time, queue: queue, type: :sketch, worker: worker}, exec_time},
       {%{series: :wait_time, queue: queue, type: :sketch, worker: worker}, wait_time}
     ])
   end
 
-  def track_event([:engine, :insert_job, _], _, %{job: job}, tab) do
-    series = String.to_existing_atom(job.state)
+  def track_event([:engine, :insert_job, _], _, meta, tab) do
+    %{job: %{queue: queue, state: state, worker: worker}} = meta
+
+    series = String.to_existing_atom(state)
 
     insert_or_update(tab, [
-      {%{series: series, queue: job.queue, type: :delta}, 1},
-      {%{series: series, queue: job.queue, type: :count}, 1}
+      {%{series: series, queue: queue, type: :delta, worker: worker}, 1},
+      {%{series: series, queue: queue, type: :count, worker: worker}, 1}
     ])
   end
 
   def track_event([:engine, :insert_all_jobs, _], _, %{jobs: jobs}, tab) do
     objects =
       jobs
-      |> Enum.group_by(&{&1.state, &1.queue})
-      |> Enum.flat_map(fn {{state, queue}, jobs} ->
+      |> Enum.group_by(&{&1.state, &1.queue, &1.worker})
+      |> Enum.flat_map(fn {{state, queue, worker}, jobs} ->
         series = String.to_existing_atom(state)
         value = length(jobs)
 
         [
-          {%{series: series, queue: queue, type: :delta}, value},
-          {%{series: series, queue: queue, type: :count}, value}
+          {%{series: series, queue: queue, type: :delta, worker: worker}, value},
+          {%{series: series, queue: queue, type: :count, worker: worker}, value}
         ]
       end)
 
@@ -251,9 +255,11 @@ defmodule Oban.Met.Reporter do
   def track_event([:plugin, _], _, %{pruned_jobs: jobs}, tab) do
     objects =
       jobs
-      |> Enum.group_by(&{&1.state, &1.queue})
-      |> Enum.map(fn {{state, queue}, jobs} ->
-        {%{series: String.to_existing_atom(state), queue: queue, type: :delta}, -length(jobs)}
+      |> Enum.group_by(&{&1.state, &1.queue, &1.worker})
+      |> Enum.map(fn {{state, queue, worker}, jobs} ->
+        series = String.to_existing_atom(state)
+
+        {%{series: series, queue: queue, type: :delta, worker: worker}, -length(jobs)}
       end)
 
     insert_or_update(tab, objects)
@@ -283,15 +289,15 @@ defmodule Oban.Met.Reporter do
 
   defp jobs_to_objects(jobs, new_series) do
     jobs
-    |> Enum.group_by(&{&1.state, &1.queue})
-    |> Enum.flat_map(fn {{state, queue}, jobs} ->
+    |> Enum.group_by(&{&1.state, &1.queue, &1.worker})
+    |> Enum.flat_map(fn {{state, queue, worker}, jobs} ->
       old_series = String.to_existing_atom(state)
       size = length(jobs)
 
       [
-        {%{series: new_series, queue: queue, type: :delta}, size},
-        {%{series: new_series, queue: queue, type: :count}, size},
-        {%{series: old_series, queue: queue, type: :delta}, -size}
+        {%{series: new_series, queue: queue, type: :delta, worker: worker}, size},
+        {%{series: new_series, queue: queue, type: :count, worker: worker}, size},
+        {%{series: old_series, queue: queue, type: :delta, worker: worker}, -size}
       ]
     end)
   end
