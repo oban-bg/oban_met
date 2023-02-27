@@ -3,7 +3,7 @@ defmodule Oban.Met.RecorderTest do
   use ExUnitProperties
 
   alias Oban.Met.Recorder
-  alias Oban.Met.Values.{Count, Sketch}
+  alias Oban.Met.Values.{Gauge, Sketch}
 
   @name Oban.Recorder
   @node "worker.1"
@@ -14,7 +14,8 @@ defmodule Oban.Met.RecorderTest do
     test "fetching metrics stored with pubsub notifications", %{pid: pid} do
       metrics = [
         %{series: :a, queue: :default, value: Sketch.new(1), worker: "A"},
-        %{series: :b, queue: :default, value: Sketch.new(1), worker: "A"}
+        %{series: :b, queue: :default, value: Sketch.new(1), worker: "A"},
+        %{series: :c, queue: :default, value: Gauge.new(1), worker: "A"}
       ]
 
       time = System.system_time(:second)
@@ -32,6 +33,7 @@ defmodule Oban.Met.RecorderTest do
 
       assert [{{"a", ^labels, ^time}, ^time, _}] = lookup(:a)
       assert [{{"b", ^labels, ^time}, ^time, _}] = lookup(:b)
+      assert [{{"c", ^labels, ^time}, ^time, _}] = lookup(:c)
     end
   end
 
@@ -54,7 +56,7 @@ defmodule Oban.Met.RecorderTest do
   describe "latest/3" do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
-    test "fetching the latest value for stored counts" do
+    test "fetching the latest value for stored gauges" do
       store(:a, 3, %{"queue" => "alpha"}, time: ts())
       store(:a, 3, %{"queue" => "gamma"}, time: ts())
       store(:a, 2, %{"queue" => "alpha"}, time: ts(-1))
@@ -91,7 +93,7 @@ defmodule Oban.Met.RecorderTest do
   describe "timeslice/3" do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
-    test "slicing counts by small periods" do
+    test "slicing gagues by small periods" do
       store(:a, 1, %{"queue" => "alpha"}, time: ts(-1))
       store(:a, 1, %{"queue" => "alpha"}, time: ts(-2))
       store(:a, 4, %{"queue" => "alpha"}, time: ts(-3))
@@ -110,7 +112,7 @@ defmodule Oban.Met.RecorderTest do
       assert [12] = timeslice_values(:a, by: 6)
     end
 
-    test "merging grouped counts through the lookback" do
+    test "merging grouped gagues through the lookback" do
       store(:a, 6, %{"queue" => "alpha", "node" => "a"}, time: ts(-6))
       store(:a, 6, %{"queue" => "alpha", "node" => "b"}, time: ts(-6))
       store(:a, 6, %{"queue" => "gamma", "node" => "a"}, time: ts(-6))
@@ -146,7 +148,7 @@ defmodule Oban.Met.RecorderTest do
       store(:a, Sketch.new([1]), %{"queue" => "alpha", "node" => "a"}, time: ts(-1))
       store(:a, Sketch.new([3]), %{"queue" => "alpha", "node" => "b"}, time: ts(-1))
 
-      assert [3, 3] = timeslice_values(:a, type: :sketch)
+      assert [3, 3] = timeslice_values(:a)
     end
   end
 
@@ -171,9 +173,8 @@ defmodule Oban.Met.RecorderTest do
 
         get_queues = fn metrics ->
           metrics
-          |> Enum.map(&get_in(&1, [Access.elem(0), Access.elem(2), :queue]))
-          |> Enum.uniq()
-          |> Enum.sort()
+          |> get_in([Access.all(), Access.elem(0), Access.elem(1), :queue])
+          |> :lists.usort()
         end
 
         assert get_queues.(originals) == get_queues.(compacted)
@@ -192,7 +193,7 @@ defmodule Oban.Met.RecorderTest do
       assert [9, 9, 9] =
                :a
                |> lookup()
-               |> Enum.map(fn {{_key, _typ, _lab, max_ts}, min_ts, _} -> max_ts - min_ts end)
+               |> Enum.map(fn {{_key, _lab, max_ts}, min_ts, _} -> max_ts - min_ts end)
     end
 
     test "compacted values are separated by series and labels" do
@@ -247,7 +248,7 @@ defmodule Oban.Met.RecorderTest do
       assert [:gamma, :alpha] =
                :a
                |> lookup()
-               |> Enum.map(&get_in(&1, [Access.elem(0), Access.elem(2), :queue]))
+               |> get_in([Access.all(), Access.elem(0), Access.elem(1), :queue])
     end
   end
 
@@ -276,13 +277,7 @@ defmodule Oban.Met.RecorderTest do
       assert length(lookup(:a)) == 2
       assert length(lookup(:b)) == 2
 
-      assert %{"all" => 4} = latest(:a)
-
-      assert 4 ==
-               :b
-               |> latest(type: :sketch)
-               |> Map.fetch!("all")
-               |> round()
+      assert %{"all" => 7} = latest(:a)
     end
   end
 
@@ -299,7 +294,7 @@ defmodule Oban.Met.RecorderTest do
   defp store(series, value, labels, opts \\ [])
 
   defp store(series, value, labels, opts) when is_integer(value) do
-    store(series, Count.new(value), labels, opts)
+    store(series, Gauge.new(value), labels, opts)
   end
 
   defp store(series, value, labels, opts) do

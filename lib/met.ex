@@ -5,7 +5,7 @@ defmodule Oban.Met do
 
   use Supervisor
 
-  alias Oban.Met.{Examiner, Recorder, Reporter, Value}
+  alias Oban.Met.{Examiner, Listener, Recorder, Value}
   alias Oban.Registry
 
   @type counts :: %{optional(String.t()) => non_neg_integer()}
@@ -135,7 +135,7 @@ defmodule Oban.Met do
     children = [
       {Examiner, conf: conf, name: Registry.via(conf.name, Examiner)},
       {Recorder, conf: conf, name: Registry.via(conf.name, Recorder)},
-      {Reporter, conf: conf, name: Registry.via(conf.name, Reporter)}
+      {Listener, conf: conf, name: Registry.via(conf.name, Listener)}
     ] ++ event_child(conf)
 
     Supervisor.init(children, strategy: :one_for_one)

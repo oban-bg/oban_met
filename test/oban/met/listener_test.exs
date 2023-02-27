@@ -1,16 +1,16 @@
-defmodule Oban.Met.ReporterTest do
+defmodule Oban.Met.ListenerTest do
   use Oban.Met.Case
 
+  alias Oban.Met.Listener
   alias Oban.Notifier
-  alias Oban.Met.Reporter
 
-  @name Oban.Reporter
+  @name Oban.Listener
 
   setup :start_supervised_oban
 
   describe "reporting" do
     test "reporting captured metrics", %{conf: conf} do
-      pid = start_supervised!({Reporter, conf: conf, name: @name})
+      pid = start_supervised!({Listener, conf: conf, name: @name})
 
       for _ <- 1..3, queue <- ~w(alpha gamma), worker <- ~w(A B C) do
         meta = %{conf: conf, job: %{queue: queue, worker: worker}}
@@ -19,7 +19,7 @@ defmodule Oban.Met.ReporterTest do
       end
 
       :ok = Notifier.listen(conf.name, [:gossip])
-      :ok = Reporter.report(pid)
+      :ok = Listener.report(pid)
 
       assert_receive {:notification, :gossip, payload}
 

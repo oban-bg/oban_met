@@ -6,10 +6,9 @@ defmodule Oban.Met.Recorder do
   use GenServer
 
   alias __MODULE__, as: State
-  alias Oban.Met.{Value, Values.Sketch}
+  alias Oban.Met.{Value, Values.Gauge, Values.Sketch}
   alias Oban.Notifier
 
-  @type name_or_table :: GenServer.name() | :ets.tid()
   @type series :: atom() | String.t()
   @type value :: Value.t()
   @type label :: String.t()
@@ -19,12 +18,7 @@ defmodule Oban.Met.Recorder do
 
   @periods [{1, 120}, {5, 600}, {60, 7_200}]
 
-  @default_latest_opts [
-    filters: [],
-    group: nil,
-    ntile: 1.0,
-    lookback: 5
-  ]
+  @default_latest_opts [filters: [], group: nil, lookback: 5]
 
   @default_timeslice_opts [
     by: 1,
@@ -77,21 +71,17 @@ defmodule Oban.Met.Recorder do
   def latest(name, series, opts \\ []) do
     opts = Keyword.validate!(opts, @default_latest_opts)
 
-    since = Keyword.fetch!(opts, :lookback)
     group = Keyword.fetch!(opts, :group)
-    ntile = Keyword.fetch!(opts, :ntile)
+    since = Keyword.fetch!(opts, :lookback)
+    filters = Keyword.fetch!(opts, :filters)
 
     name
     |> table()
-    |> select(series, since, opts[:filters])
-    |> Enum.dedup_by(fn {{_, _, labels, _}, _, _} -> labels end)
-    |> Enum.group_by(fn {{_, _, labels, _}, _, _} -> labels[group] || "all" end)
+    |> select(series, since, filters)
+    |> Enum.dedup_by(fn {{_, labels, _}, _, _} -> labels end)
+    |> Enum.group_by(fn {{_, labels, _}, _, _} -> labels[group] || "all" end)
     |> Map.new(fn {group, metrics} ->
-      merged =
-        metrics
-        |> get_in([Access.all(), Access.elem(2)])
-        |> Enum.reduce(&Value.merge/2)
-        |> Value.quantile(ntile)
+      merged = Enum.reduce(metrics, 0, fn {_key, _mts, val}, acc -> acc + val.data end)
 
       {group, merged}
     end)
@@ -110,7 +100,7 @@ defmodule Oban.Met.Recorder do
     name
     |> table()
     |> select(series, since, opts[:filters])
-    |> Enum.reduce(%{}, fn {{_, _, labels, ts}, _, value}, acc ->
+    |> Enum.reduce(%{}, fn {{_, labels, ts}, _, value}, acc ->
       label = labels[group]
       chunk = div(stime - ts - 1, slice)
 
@@ -122,16 +112,14 @@ defmodule Oban.Met.Recorder do
     end)
   end
 
-  @doc false
+  def compact(name, periods) when is_list(periods) do
+    GenServer.call(name, {:compact, periods})
+  end
+
   def store(name, series, value, labels, opts \\ []) do
     time = Keyword.get(opts, :time, System.system_time(:second))
 
     GenServer.call(name, {:store, {series, value, labels, time}})
-  end
-
-  @doc false
-  def compact(name, periods) when is_list(periods) do
-    GenServer.call(name, {:compact, periods})
   end
 
   # Callbacks
@@ -151,7 +139,6 @@ defmodule Oban.Met.Recorder do
       |> schedule_compact()
 
     Notifier.listen(state.conf.name, [:gossip])
-
     Registry.register(Oban.Registry, state.name, table)
 
     # Used to ensure testing helpers to auto-allow this module for sandbox access.
@@ -161,16 +148,16 @@ defmodule Oban.Met.Recorder do
   end
 
   @impl GenServer
-  def handle_call({:store, params}, _from, %State{table: table} = state) do
-    {series, value, labels, time} = params
-
-    inner_store(table, series, value, labels, time)
+  def handle_call({:compact, periods}, _from, %State{table: table} = state) do
+    inner_compact(table, periods)
 
     {:reply, :ok, state}
   end
 
-  def handle_call({:compact, periods}, _from, %State{table: table} = state) do
-    inner_compact(table, periods)
+  def handle_call({:store, params}, _from, %State{table: table} = state) do
+    {series, value, labels, time} = params
+
+    inner_store(table, series, value, labels, time)
 
     {:reply, :ok, state}
   end
@@ -181,9 +168,8 @@ defmodule Oban.Met.Recorder do
 
     for %{"queue" => queue, "series" => series, "value" => value, "worker" => worker} <- metrics do
       labels = %{"node" => node, "queue" => queue, "worker" => worker}
-      sketch = Sketch.from_map(value)
 
-      inner_store(state.table, series, sketch, labels, time)
+      inner_store(state.table, series, from_map(value), labels, time)
     end
 
     {:noreply, state}
@@ -199,12 +185,62 @@ defmodule Oban.Met.Recorder do
     {:noreply, schedule_compact(state)}
   end
 
+  defp from_map(%{"size" => _} = value), do: Sketch.from_map(value)
+  defp from_map(value), do: Gauge.from_map(value)
+
   # Table
 
   defp table(name) do
     [{_pid, table}] = Registry.lookup(Oban.Registry, name)
 
     table
+  end
+
+  defp inner_compact(table, periods) do
+    delete_outdated(table, periods)
+
+    Enum.reduce(periods, System.system_time(:second), fn {step, duration}, ts ->
+      since = ts - duration
+      match = {{:_,  :_, :"$1"}, :"$2", :_}
+      guard = [{:andalso, {:>=, :"$2", since}, {:"=<", :"$1", ts}}]
+
+      objects = :ets.select(table, [{match, guard, [:"$_"]}])
+      _delete = :ets.select_delete(table, [{match, guard, [true]}])
+
+      objects
+      |> Enum.chunk_by(fn {{ser, lab, max}, _, _} ->
+        {ser, lab, div(ts - max - 1, step)}
+      end)
+      |> Enum.map(&compact_object/1)
+      |> then(&:ets.insert(table, &1))
+
+      since
+    end)
+  end
+
+  defp compact_object([{{series, labels, _}, _, _} | _] = metrics) do
+    {min_ts, max_ts} =
+      metrics
+      |> Enum.flat_map(fn {{_, _, max_ts}, min_ts, _} -> [max_ts, min_ts] end)
+      |> Enum.min_max()
+
+    value =
+      metrics
+      |> Enum.map(&elem(&1, 2))
+      |> Enum.reduce(&Value.merge/2)
+
+    {{series, labels, max_ts}, min_ts, value}
+  end
+
+  defp delete_outdated(table, periods) do
+    systime = System.system_time(:second)
+    maximum = Enum.reduce(periods, 0, fn {_, duration}, acc -> duration + acc end)
+
+    since = systime - maximum
+    match = {{:_, :_, :"$1"}, :_, :_}
+    guard = [{:<, :"$1", since}]
+
+    :ets.select_delete(table, [{match, guard, [true]}])
   end
 
   defp inner_store(table, series, value, labels, time) do
@@ -218,53 +254,6 @@ defmodule Oban.Met.Recorder do
       end
 
     :ets.insert(table, {key, time, value})
-  end
-
-  defp inner_compact(table, periods) do
-    delete_outdated(table, periods)
-
-    Enum.reduce(periods, System.system_time(:second), fn {step, duration}, ts ->
-      since = ts - duration
-      match = {{:_, :_, :_, :"$1"}, :"$2", :_}
-      guard = [{:andalso, {:>=, :"$2", since}, {:"=<", :"$1", ts}}]
-
-      objects = :ets.select(table, [{match, guard, [:"$_"]}])
-      _delete = :ets.select_delete(table, [{match, guard, [true]}])
-
-      objects
-      |> Enum.chunk_by(fn {{ser, typ, lab, max}, _, _} ->
-        {ser, typ, lab, div(ts - max - 1, step)}
-      end)
-      |> Enum.map(&compact_object/1)
-      |> then(&:ets.insert(table, &1))
-
-      since
-    end)
-  end
-
-  defp compact_object([{{series, labels, _}, _, _} | _] = metrics) do
-    {min_ts, max_ts} =
-      metrics
-      |> Enum.flat_map(fn {{_, _, _, max_ts}, min_ts, _} -> [max_ts, min_ts] end)
-      |> Enum.min_max()
-
-    value =
-      metrics
-      |> Enum.map(&elem(&1, 2))
-      |> Enum.reduce(&Value.compact/2)
-
-    {{series, labels, max_ts}, min_ts, value}
-  end
-
-  defp delete_outdated(table, periods) do
-    systime = System.system_time(:second)
-    maximum = Enum.reduce(periods, 0, fn {_, duration}, acc -> duration + acc end)
-
-    since = systime - maximum
-    match = {{:_, :_, :_, :"$1"}, :_, :_}
-    guard = [{:<, :"$1", since}]
-
-    :ets.select_delete(table, [{match, guard, [true]}])
   end
 
   # Scheduling

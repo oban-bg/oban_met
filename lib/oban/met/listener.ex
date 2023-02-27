@@ -1,4 +1,4 @@
-defmodule Oban.Met.Reporter do
+defmodule Oban.Met.Listener do
   @moduledoc false
 
   # Track local telemetry events and periodically relay them to external recorders.
