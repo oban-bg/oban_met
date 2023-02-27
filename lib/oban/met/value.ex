@@ -9,11 +9,6 @@ defprotocol Oban.Met.Value do
   def add(struct, value)
 
   @doc """
-  Merge two values for compaction.
-  """
-  def compact(struct_a, struct_b)
-
-  @doc """
   Merge two values into one.
   """
   def merge(struct_a, struct_b)
@@ -24,11 +19,9 @@ defprotocol Oban.Met.Value do
   def quantile(struct, quantile)
 end
 
-for module <- [Oban.Met.Values.Count, Oban.Met.Values.Gauge, Oban.Met.Values.Sketch] do
+for module <- [Oban.Met.Values.Count, Oban.Met.Values.Sketch] do
   defimpl Oban.Met.Value, for: module do
     defdelegate add(struct, value), to: @for
-
-    defdelegate compact(struct_1, struct_2), to: @for
 
     defdelegate merge(struct_1, struct_2), to: @for
 

@@ -44,21 +44,6 @@ defmodule Oban.Met.Values.Count do
   end
 
   @doc """
-  Compact two counts into one, adding the values.
-
-  ## Examples
-
-  Compacting two counts adds the values:
-
-      iex> count_1 = Count.new(1)
-      ...> count_2 = Count.new(2)
-      ...> Count.compact(count_1, count_2)
-      %Count{data: 3}
-  """
-  @spec compact(t(), t()) :: t()
-  def compact(count_1, count_2), do: merge(count_1, count_2)
-
-  @doc """
   Merges two counts into a one.
 
   ## Examples

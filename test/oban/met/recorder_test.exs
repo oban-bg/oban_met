@@ -3,40 +3,18 @@ defmodule Oban.Met.RecorderTest do
   use ExUnitProperties
 
   alias Oban.Met.Recorder
-  alias Oban.Met.Values.{Count, Gauge, Sketch}
+  alias Oban.Met.Values.{Count, Sketch}
 
   @name Oban.Recorder
   @node "worker.1"
-
-  describe "store/5" do
-    setup [:start_supervised_oban, :start_supervised_recorder]
-
-    test "gauges never drop below 0 with negative deltas" do
-      store(:a, :gauge, +1, %{"queue" => "alpha"})
-      store(:a, :delta, -1, %{"queue" => "alpha"})
-      store(:a, :delta, -1, %{"queue" => "alpha"})
-
-      assert %{"all" => 0} = latest(:a)
-    end
-
-    test "positive deltas are converted to gauge without anything historical" do
-      store(:a, :delta, +1, %{"queue" => "alpha"})
-      store(:b, :delta, -1, %{"queue" => "alpha"})
-
-      assert %{"all" => 1} = latest(:a)
-      assert %{"all" => 0} = latest(:b)
-    end
-  end
 
   describe "lookup/2" do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
     test "fetching metrics stored with pubsub notifications", %{pid: pid} do
       metrics = [
-        %{series: :a, node: @node, queue: :default, type: :gauge, value: Gauge.new(1)},
-        %{series: :b, node: @node, queue: :default, type: :count, value: Count.new(1)},
-        %{series: :c, node: @node, queue: :default, type: :sketch, value: Sketch.new(1)},
-        %{series: :d, node: @node, queue: :default, type: :delta, value: 1}
+        %{series: :a, queue: :default, value: Sketch.new(1), worker: "A"},
+        %{series: :b, queue: :default, value: Sketch.new(1), worker: "A"}
       ]
 
       time = System.system_time(:second)
@@ -50,10 +28,10 @@ defmodule Oban.Met.RecorderTest do
 
       Process.sleep(10)
 
-      assert [{{"a", :gauge, labels, ^time}, ^time, _}] = lookup(:a)
-      assert [{{"b", :count, _label, ^time}, ^time, _}] = lookup(:b)
-      assert [{{"c", :sketch, _label, ^time}, ^time, _}] = lookup(:c)
-      assert %{"node" => @node, "queue" => "default"} = labels
+      labels = %{"node" => @node, "queue" => "default", "worker" => "A"}
+
+      assert [{{"a", ^labels, ^time}, ^time, _}] = lookup(:a)
+      assert [{{"b", ^labels, ^time}, ^time, _}] = lookup(:b)
     end
   end
 
@@ -61,11 +39,11 @@ defmodule Oban.Met.RecorderTest do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
     test "fetching all values for a particular label" do
-      store(:a, :gauge, 3, %{"queue" => "alpha"}, time: ts())
-      store(:b, :gauge, 3, %{"queue" => "gamma"}, time: ts())
-      store(:c, :gauge, 3, %{"queue" => "delta"}, time: ts())
-      store(:d, :gauge, 3, %{"queue" => "delta"}, time: ts())
-      store(:e, :gauge, 3, %{"other" => "omega"}, time: ts())
+      store(:a, 3, %{"queue" => "alpha"}, time: ts())
+      store(:b, 3, %{"queue" => "gamma"}, time: ts())
+      store(:c, 3, %{"queue" => "delta"}, time: ts())
+      store(:d, 3, %{"queue" => "delta"}, time: ts())
+      store(:e, 3, %{"other" => "omega"}, time: ts())
 
       assert ~w(alpha delta gamma) = Recorder.labels(@name, "queue")
       assert ~w(omega) = Recorder.labels(@name, "other")
@@ -76,42 +54,31 @@ defmodule Oban.Met.RecorderTest do
   describe "latest/3" do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
-    test "fetching the latest value for stored gauges" do
-      store(:a, :gauge, 3, %{"queue" => "alpha"}, time: ts())
-      store(:a, :gauge, 3, %{"queue" => "gamma"}, time: ts())
-      store(:a, :gauge, 2, %{"queue" => "alpha"}, time: ts(-1))
-      store(:a, :gauge, 2, %{"queue" => "gamma"}, time: ts(-1))
-      store(:a, :gauge, 1, %{"queue" => "alpha"}, time: ts(-2))
-      store(:a, :gauge, 1, %{"queue" => "gamma"}, time: ts(-2))
+    test "fetching the latest value for stored counts" do
+      store(:a, 3, %{"queue" => "alpha"}, time: ts())
+      store(:a, 3, %{"queue" => "gamma"}, time: ts())
+      store(:a, 2, %{"queue" => "alpha"}, time: ts(-1))
+      store(:a, 2, %{"queue" => "gamma"}, time: ts(-1))
+      store(:a, 1, %{"queue" => "alpha"}, time: ts(-2))
+      store(:a, 1, %{"queue" => "gamma"}, time: ts(-2))
 
       assert %{"all" => 6} = latest(:a)
     end
 
-    test "fetching the latest value for stored sketches" do
-      store(:a, :sketch, [1, 2], %{"queue" => "alpha"}, time: ts())
-      store(:a, :sketch, [2, 3], %{"queue" => "gamma"}, time: ts())
-      store(:a, :sketch, [3, 4], %{"queue" => "alpha"}, time: ts(-1))
-      store(:a, :sketch, [3, 4], %{"queue" => "gamma"}, time: ts(-1))
-
-      assert %{"all" => ntile} = latest(:a, type: :sketch)
-
-      assert_in_delta ntile, 3.0, 0.2
-    end
-
     test "grouping the latest values by a label" do
-      store(:a, :gauge, 4, %{"node" => "web.2", "queue" => "alpha"})
-      store(:a, :gauge, 3, %{"node" => "web.2", "queue" => "gamma"})
-      store(:a, :gauge, 4, %{"node" => "web.1", "queue" => "alpha"})
-      store(:a, :gauge, 3, %{"node" => "web.1", "queue" => "gamma"})
+      store(:a, 4, %{"node" => "web.2", "queue" => "alpha"})
+      store(:a, 3, %{"node" => "web.2", "queue" => "gamma"})
+      store(:a, 4, %{"node" => "web.1", "queue" => "alpha"})
+      store(:a, 3, %{"node" => "web.1", "queue" => "gamma"})
 
       assert %{"alpha" => 8, "gamma" => 6} = latest(:a, group: "queue")
       assert %{"web.1" => 7, "web.2" => 7} = latest(:a, group: "node")
     end
 
     test "filtering the latest values by a label" do
-      store(:a, :gauge, 4, %{"node" => "web.1", "queue" => "alpha"})
-      store(:a, :gauge, 3, %{"node" => "web.2", "queue" => "gamma"})
-      store(:a, :gauge, 2, %{"node" => "web.2", "queue" => "alpha"})
+      store(:a, 4, %{"node" => "web.1", "queue" => "alpha"})
+      store(:a, 3, %{"node" => "web.2", "queue" => "gamma"})
+      store(:a, 2, %{"node" => "web.2", "queue" => "alpha"})
 
       assert %{"all" => 4} == latest(:a, filters: [node: "web.1"])
       assert %{"all" => 5} == latest(:a, filters: [node: ["web.2"]])
@@ -125,11 +92,11 @@ defmodule Oban.Met.RecorderTest do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
     test "slicing counts by small periods" do
-      store(:a, :count, 1, %{"queue" => "alpha"}, time: ts(-1))
-      store(:a, :count, 1, %{"queue" => "alpha"}, time: ts(-2))
-      store(:a, :count, 4, %{"queue" => "alpha"}, time: ts(-3))
-      store(:a, :count, 1, %{"queue" => "alpha"}, time: ts(-4))
-      store(:a, :count, 5, %{"queue" => "alpha"}, time: ts(-5))
+      store(:a, 1, %{"queue" => "alpha"}, time: ts(-1))
+      store(:a, 1, %{"queue" => "alpha"}, time: ts(-2))
+      store(:a, 4, %{"queue" => "alpha"}, time: ts(-3))
+      store(:a, 1, %{"queue" => "alpha"}, time: ts(-4))
+      store(:a, 5, %{"queue" => "alpha"}, time: ts(-5))
 
       assert [{ts, value, label} | _] = timeslice(:a)
 
@@ -144,17 +111,17 @@ defmodule Oban.Met.RecorderTest do
     end
 
     test "merging grouped counts through the lookback" do
-      store(:a, :count, 6, %{"queue" => "alpha", "node" => "a"}, time: ts(-6))
-      store(:a, :count, 6, %{"queue" => "alpha", "node" => "b"}, time: ts(-6))
-      store(:a, :count, 6, %{"queue" => "gamma", "node" => "a"}, time: ts(-6))
+      store(:a, 6, %{"queue" => "alpha", "node" => "a"}, time: ts(-6))
+      store(:a, 6, %{"queue" => "alpha", "node" => "b"}, time: ts(-6))
+      store(:a, 6, %{"queue" => "gamma", "node" => "a"}, time: ts(-6))
 
-      store(:a, :count, 4, %{"queue" => "alpha", "node" => "a"}, time: ts(-4))
-      store(:a, :count, 4, %{"queue" => "alpha", "node" => "b"}, time: ts(-4))
-      store(:a, :count, 4, %{"queue" => "gamma", "node" => "b"}, time: ts(-4))
+      store(:a, 4, %{"queue" => "alpha", "node" => "a"}, time: ts(-4))
+      store(:a, 4, %{"queue" => "alpha", "node" => "b"}, time: ts(-4))
+      store(:a, 4, %{"queue" => "gamma", "node" => "b"}, time: ts(-4))
 
-      store(:a, :count, 2, %{"queue" => "alpha", "node" => "a"}, time: ts(-2))
-      store(:a, :count, 2, %{"queue" => "alpha", "node" => "b"}, time: ts(-2))
-      store(:a, :count, 2, %{"queue" => "gamma", "node" => "b"}, time: ts(-2))
+      store(:a, 2, %{"queue" => "alpha", "node" => "a"}, time: ts(-2))
+      store(:a, 2, %{"queue" => "alpha", "node" => "b"}, time: ts(-2))
+      store(:a, 2, %{"queue" => "gamma", "node" => "b"}, time: ts(-2))
 
       values_for = fn slices, group ->
         slices
@@ -174,19 +141,12 @@ defmodule Oban.Met.RecorderTest do
     end
 
     test "merging sketch data across labels for the same timestamp" do
-      store(:a, :sketch, [1], %{"queue" => "alpha", "node" => "a"}, time: ts(-2))
-      store(:a, :sketch, [3], %{"queue" => "alpha", "node" => "b"}, time: ts(-2))
-      store(:a, :sketch, [1], %{"queue" => "alpha", "node" => "a"}, time: ts(-1))
-      store(:a, :sketch, [3], %{"queue" => "alpha", "node" => "b"}, time: ts(-1))
+      store(:a, Sketch.new([1]), %{"queue" => "alpha", "node" => "a"}, time: ts(-2))
+      store(:a, Sketch.new([3]), %{"queue" => "alpha", "node" => "b"}, time: ts(-2))
+      store(:a, Sketch.new([1]), %{"queue" => "alpha", "node" => "a"}, time: ts(-1))
+      store(:a, Sketch.new([3]), %{"queue" => "alpha", "node" => "b"}, time: ts(-1))
 
       assert [3, 3] = timeslice_values(:a, type: :sketch)
-    end
-
-    test "using counts over gauges with the same series name" do
-      store(:a, :count, 3, %{"queue" => "alpha"}, time: ts(-1))
-      store(:a, :gauge, 0, %{"queue" => "alpha"}, time: ts(-1))
-
-      assert [3] = timeslice_values(:a)
     end
   end
 
@@ -195,7 +155,7 @@ defmodule Oban.Met.RecorderTest do
 
     test "gauges within periods of time are compacted by interval" do
       for series <- [:a, :b], queue <- [:alpha, :gamma, :delta], off <- [1, 5, 6, 9] do
-        store(series, :gauge, 1, %{queue: queue}, time: ts(-off))
+        store(series, 1, %{queue: queue}, time: ts(-off))
       end
 
       originals_a = lookup(:a)
@@ -222,7 +182,7 @@ defmodule Oban.Met.RecorderTest do
 
     test "compacted intervals contain a range from min to max time" do
       for offset <- 1..30 do
-        store(:a, :gauge, 1, %{queue: :alpha}, time: ts(-offset))
+        store(:a, 1, %{queue: :alpha}, time: ts(-offset))
       end
 
       assert length(lookup(:a)) == 30
@@ -237,8 +197,8 @@ defmodule Oban.Met.RecorderTest do
 
     test "compacted values are separated by series and labels" do
       for series <- [:a, :b], offset <- [1, 2] do
-        store(series, :gauge, 1, %{queue: :alpha}, time: ts(-offset))
-        store(series, :gauge, 2, %{queue: :gamma}, time: ts(-offset))
+        store(series, 1, %{queue: :alpha}, time: ts(-offset))
+        store(series, 2, %{queue: :gamma}, time: ts(-offset))
       end
 
       assert length(lookup(:a)) == 4
@@ -252,7 +212,7 @@ defmodule Oban.Met.RecorderTest do
 
     test "sketches within periods of time are compacted by interval" do
       for offset <- [1, 4, 5, 6, 7] do
-        store(:a, :sketch, [1, 2, 3], %{queue: :alpha}, time: ts(-offset))
+        store(:a, Sketch.new([1, 2, 3]), %{queue: :alpha}, time: ts(-offset))
       end
 
       compact([{5, 60}])
@@ -265,7 +225,7 @@ defmodule Oban.Met.RecorderTest do
 
     test "compacting metrics multiple times is idempotent" do
       for queue <- [:alpha, :gamma], offset <- 1..61 do
-        store(:a, :gauge, 1, %{"queue" => queue}, time: ts(-offset))
+        store(:a, 1, %{"queue" => queue}, time: ts(-offset))
       end
 
       compact([{5, 60}])
@@ -278,9 +238,9 @@ defmodule Oban.Met.RecorderTest do
     end
 
     test "deleting metrics beyond the final period" do
-      store(:a, :gauge, 1, %{queue: :alpha}, time: ts(-119))
-      store(:a, :gauge, 1, %{queue: :gamma}, time: ts(-120))
-      store(:a, :gauge, 1, %{queue: :delta}, time: ts(-121))
+      store(:a, 1, %{queue: :alpha}, time: ts(-119))
+      store(:a, 1, %{queue: :gamma}, time: ts(-120))
+      store(:a, 1, %{queue: :delta}, time: ts(-121))
 
       compact([{1, 60}, {1, 60}])
 
@@ -288,21 +248,6 @@ defmodule Oban.Met.RecorderTest do
                :a
                |> lookup()
                |> Enum.map(&get_in(&1, [Access.elem(0), Access.elem(2), :queue]))
-    end
-
-    test "applying a delta after gauge compaction" do
-      store(:a, :gauge, 4, %{queue: :alpha}, time: ts(-1))
-      store(:a, :gauge, 3, %{queue: :alpha}, time: ts(-2))
-      store(:a, :gauge, 2, %{queue: :alpha}, time: ts(-3))
-
-      compact([{5, 60}])
-
-      assert %{"all" => 4} = latest(:a)
-
-      store(:a, :delta, 1, %{queue: :alpha})
-      store(:a, :delta, 1, %{queue: :alpha})
-
-      assert %{"all" => 6} = latest(:a)
     end
   end
 
@@ -312,14 +257,14 @@ defmodule Oban.Met.RecorderTest do
     test "compacting on an interval", %{conf: conf} do
       pid = start_supervised!({Recorder, conf: conf, name: @name, compact_periods: [{5, 60}]})
 
-      store(:a, :gauge, 4, %{queue: :alpha}, time: ts(-3))
-      store(:a, :gauge, 3, %{queue: :alpha}, time: ts(-4))
-      store(:a, :gauge, 2, %{queue: :alpha}, time: ts(-6))
-      store(:a, :gauge, 1, %{queue: :alpha}, time: ts(-7))
+      store(:a, 4, %{queue: :alpha}, time: ts(-3))
+      store(:a, 3, %{queue: :alpha}, time: ts(-4))
+      store(:a, 2, %{queue: :alpha}, time: ts(-6))
+      store(:a, 1, %{queue: :alpha}, time: ts(-7))
 
-      store(:b, :sketch, [4, 3], %{queue: :alpha}, time: ts(-3))
-      store(:b, :sketch, [3, 2], %{queue: :alpha}, time: ts(-4))
-      store(:b, :sketch, [2, 1], %{queue: :alpha}, time: ts(-6))
+      store(:b, Sketch.new([4, 3]), %{queue: :alpha}, time: ts(-3))
+      store(:b, Sketch.new([3, 2]), %{queue: :alpha}, time: ts(-4))
+      store(:b, Sketch.new([2, 1]), %{queue: :alpha}, time: ts(-6))
 
       assert length(lookup(:a)) == 4
       assert length(lookup(:b)) == 3
@@ -351,16 +296,14 @@ defmodule Oban.Met.RecorderTest do
     Recorder.compact(@name, periods)
   end
 
-  defp store(series, type, value, labels, opts \\ []) do
-    value =
-      case type do
-        :count -> Count.new(value)
-        :gauge -> Gauge.new(value)
-        :sketch -> Sketch.new(value)
-        :delta -> value
-      end
+  defp store(series, value, labels, opts \\ [])
 
-    Recorder.store(@name, series, type, value, labels, opts)
+  defp store(series, value, labels, opts) when is_integer(value) do
+    store(series, Count.new(value), labels, opts)
+  end
+
+  defp store(series, value, labels, opts) do
+    Recorder.store(@name, series, value, labels, opts)
   end
 
   defp latest(series, opts \\ []) do

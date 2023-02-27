@@ -65,23 +65,6 @@ defmodule Oban.Met.Values.Sketch do
   end
 
   @doc """
-  Compact two sketch instances.
-
-  Compacting a sketch is the same as merging.
-
-  ## Examples
-
-      iex> sketch_1 = Sketch.new([1])
-      ...>
-      ...> Sketch.new([2])
-      ...> |> Sketch.compact(sketch_1)
-      ...> |> Sketch.size()
-      2
-  """
-  @spec compact(t(), t()) :: t()
-  def compact(sketch_1, sketch_2), do: merge(sketch_1, sketch_2)
-
-  @doc """
   Merge two sketch instances.
 
   ## Examples
