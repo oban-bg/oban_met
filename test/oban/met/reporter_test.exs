@@ -8,7 +8,8 @@ defmodule Oban.Met.ReporterTest do
 
   setup :start_supervised_oban
 
-  describe "reporting" do
+  describe "checkups" do
+    @tag oban_opts: [peer: Oban.Peers.Isolated, testing: :disabled]
     test "reporting queried counts", %{conf: conf} do
       pid = start_supervised!({Reporter, conf: conf, name: @name})
 
@@ -19,8 +20,8 @@ defmodule Oban.Met.ReporterTest do
 
       Oban.insert_all(conf.name, changesets)
 
-      :ok = Notifier.listen(conf.name, [:gossip])
-      :ok = Reporter.checkpoint(pid)
+      Notifier.listen(conf.name, [:gossip])
+      send(pid, :checkpoint)
 
       assert_receive {:notification, :gossip, payload}
 
@@ -30,6 +31,16 @@ defmodule Oban.Met.ReporterTest do
       assert ~w(available) = utake(metrics, "series")
       assert ~w(alpha gamma) = utake(metrics, "queue")
       assert ~w(Worker.A Worker.B) = utake(metrics, "worker")
+    end
+
+    @tag oban_opts: [peer: Oban.Peers.Disabled]
+    test "skipping checks when the instance is a follower", %{conf: conf} do
+      pid = start_supervised!({Reporter, conf: conf, name: @name})
+
+      Notifier.listen(conf.name, [:gossip])
+      send(pid, :checkpoint)
+
+      refute_receive {:notification, :gossip, _}
     end
   end
 

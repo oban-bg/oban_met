@@ -24,16 +24,15 @@ defmodule Oban.Met.Case do
 
     name = make_ref()
 
-    opts =
-      Keyword.merge(oban_opts,
+    base_opts = [
         name: name,
         node: "worker.1",
         notifier: Oban.Notifiers.PG,
         repo: Oban.Met.Repo,
         testing: :manual
-      )
+    ]
 
-    start_supervised!({Oban, opts})
+    start_supervised!({Oban, Keyword.merge(base_opts, oban_opts)})
 
     conf = Oban.config(name)
 

@@ -8,7 +8,7 @@ defmodule Oban.Met.Reporter do
   import Ecto.Query, only: [group_by: 3, select: 3]
 
   alias __MODULE__, as: State
-  alias Oban.{Backoff, Job, Notifier, Repo}
+  alias Oban.{Backoff, Job, Notifier, Peer, Repo}
   alias Oban.Met.Values.Gauge
 
   @empty %{
@@ -35,12 +35,6 @@ defmodule Oban.Met.Reporter do
     GenServer.start_link(__MODULE__, opts, name: opts[:name])
   end
 
-  @doc false
-  @spec checkpoint(GenServer.name()) :: :ok
-  def checkpoint(name) do
-    GenServer.call(name, :checkpoint)
-  end
-
   # Callbacks
 
   @impl GenServer
@@ -64,28 +58,23 @@ defmodule Oban.Met.Reporter do
 
   @impl GenServer
   def handle_info(:checkpoint, %State{conf: conf} = state) do
-    metrics =
-      for {series, queue, worker, value} <- counts(conf) do
-        %{series: series, queue: queue, worker: worker, value: Gauge.new(value)}
-      end
+    if Peer.leader?(conf.name) do
+      metrics =
+        for {series, queue, worker, value} <- counts(conf) do
+          %{series: series, queue: queue, worker: worker, value: Gauge.new(value)}
+        end
 
-    payload = %{
-      metrics: metrics,
-      name: inspect(conf.name),
-      node: conf.node,
-      time: System.system_time(:second)
-    }
+      payload = %{
+        metrics: metrics,
+        name: inspect(conf.name),
+        node: conf.node,
+        time: System.system_time(:second)
+      }
 
-    Notifier.notify(conf, :gossip, payload)
+      Notifier.notify(conf, :gossip, payload)
+    end
 
-    {:noreply, state}
-  end
-
-  @impl GenServer
-  def handle_call(:checkpoint, _from, %State{} = state) do
-    handle_info(:checkpoint, state)
-
-    {:reply, :ok, state}
+    {:noreply, schedule_checkpoint(state)}
   end
 
   defp schedule_checkpoint(state) do
