@@ -1,5 +1,5 @@
 defmodule Oban.Met.Test do
-  use Oban.Met.Case, async: false
+  use Oban.Met.Case
 
   describe "initializing storage with :auto_mode enabled" do
     test "starting storage servers for oban instances on :init" do

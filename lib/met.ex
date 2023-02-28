@@ -5,7 +5,7 @@ defmodule Oban.Met do
 
   use Supervisor
 
-  alias Oban.Met.{Examiner, Listener, Recorder, Value}
+  alias Oban.Met.{Examiner, Listener, Recorder, Reporter, Value}
   alias Oban.Registry
 
   @type counts :: %{optional(String.t()) => non_neg_integer()}
@@ -132,11 +132,13 @@ defmodule Oban.Met do
   def init(opts) do
     conf = Keyword.fetch!(opts, :conf)
 
-    children = [
-      {Examiner, conf: conf, name: Registry.via(conf.name, Examiner)},
-      {Recorder, conf: conf, name: Registry.via(conf.name, Recorder)},
-      {Listener, conf: conf, name: Registry.via(conf.name, Listener)}
-    ] ++ event_child(conf)
+    children =
+      [
+        {Examiner, conf: conf, name: Registry.via(conf.name, Examiner)},
+        {Recorder, conf: conf, name: Registry.via(conf.name, Recorder)},
+        {Listener, conf: conf, name: Registry.via(conf.name, Listener)},
+        {Reporter, conf: conf, name: Registry.via(conf.name, Reporter)}
+      ] ++ event_child(conf)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
@@ -144,8 +146,6 @@ defmodule Oban.Met do
   defp event_child(conf) do
     meta = %{pid: self(), conf: conf}
 
-    init_task = fn -> :telemetry.execute([:oban, :met, :init], %{}, meta) end
-
-    [Supervisor.child_spec({Task, init_task}, restart: :temporary)]
+    [Task.child_spec(fn -> :telemetry.execute([:oban, :met, :init], %{}, meta) end)]
   end
 end

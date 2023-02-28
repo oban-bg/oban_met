@@ -12,9 +12,9 @@ defmodule Oban.Met.Listener do
   defstruct [
     :conf,
     :name,
-    :report_timer,
     :table,
-    report_interval: :timer.seconds(1)
+    :timer,
+    interval: :timer.seconds(1)
   ]
 
   @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
@@ -30,7 +30,7 @@ defmodule Oban.Met.Listener do
   end
 
   @doc false
-  @spec report(GenServer.name()) :: [tuple()]
+  @spec report(GenServer.name()) :: :ok
   def report(name) do
     GenServer.call(name, :report)
   end
@@ -55,8 +55,8 @@ defmodule Oban.Met.Listener do
   end
 
   @impl GenServer
-  def terminate(_reason, %State{report_timer: rt} = state) do
-    if is_reference(rt), do: Process.cancel_timer(rt)
+  def terminate(_reason, %State{timer: timer} = state) do
+    if is_reference(timer), do: Process.cancel_timer(timer)
 
     :telemetry.detach(handler_id(state))
 
@@ -123,8 +123,8 @@ defmodule Oban.Met.Listener do
   # Scheduling
 
   defp schedule_report(state) do
-    timer = Process.send_after(self(), :report, state.report_interval)
+    timer = Process.send_after(self(), :report, state.interval)
 
-    %{state | report_timer: timer}
+    %{state | timer: timer}
   end
 end

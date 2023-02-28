@@ -141,9 +141,6 @@ defmodule Oban.Met.Recorder do
     Notifier.listen(state.conf.name, [:gossip])
     Registry.register(Oban.Registry, state.name, table)
 
-    # Used to ensure testing helpers to auto-allow this module for sandbox access.
-    :telemetry.execute([:oban, :plugin, :init], %{}, %{conf: state.conf, plugin: __MODULE__})
-
     {:ok, state}
   end
 
@@ -201,7 +198,7 @@ defmodule Oban.Met.Recorder do
 
     Enum.reduce(periods, System.system_time(:second), fn {step, duration}, ts ->
       since = ts - duration
-      match = {{:_,  :_, :"$1"}, :"$2", :_}
+      match = {{:_, :_, :"$1"}, :"$2", :_}
       guard = [{:andalso, {:>=, :"$2", since}, {:"=<", :"$1", ts}}]
 
       objects = :ets.select(table, [{match, guard, [:"$_"]}])

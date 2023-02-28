@@ -3,6 +3,8 @@ defmodule Oban.Met.Application do
 
   use Application
 
+  require Logger
+
   @supervisor Oban.Met.AppSup
   @handler_id :oban_met_handler
 
@@ -25,7 +27,13 @@ defmodule Oban.Met.Application do
     opts = Application.get_all_env(:oban_met)
 
     if opts[:auto_start] and conf.testing in opts[:auto_testing_modes] do
-      Supervisor.start_child(@supervisor, {Oban.Met, conf: conf})
+      case Supervisor.start_child(@supervisor, {Oban.Met, conf: conf}) do
+        {:ok, _child} ->
+          :ok
+
+        {:error, {error, _stack}} ->
+          Logger.error("Unable to start Oban.Met supervisor: #{inspect(error)}")
+      end
     end
   end
 end

@@ -1,5 +1,5 @@
 defmodule Oban.Met.ListenerTest do
-  use Oban.Met.Case
+  use Oban.Met.Case, async: true
 
   alias Oban.Met.Listener
   alias Oban.Notifier
