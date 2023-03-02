@@ -1,9 +1,9 @@
 defmodule Oban.Met.Reporter do
   @moduledoc false
 
-  use GenServer
-
   # Periodically count and report jobs by state, queue, and worker
+
+  use GenServer
 
   import Ecto.Query, only: [group_by: 3, select: 3]
 
@@ -60,9 +60,9 @@ defmodule Oban.Met.Reporter do
   def handle_info(:checkpoint, %State{conf: conf} = state) do
     if Peer.leader?(conf.name) do
       metrics =
-        for {series, queue, worker, value} <- counts(conf) do
-          %{series: series, queue: queue, worker: worker, value: Gauge.new(value)}
-        end
+        conf
+        |> counts()
+        |> Enum.map(fn map -> Map.update!(map, :value, &Gauge.new/1) end)
 
       payload = %{
         metrics: metrics,
@@ -85,7 +85,7 @@ defmodule Oban.Met.Reporter do
     query =
       Job
       |> group_by([j], [j.state, j.queue, j.worker])
-      |> select([j], {j.state, j.queue, j.worker, count(j.id)})
+      |> select([j], %{series: j.state, queue: j.queue, worker: j.worker, value: count(j.id)})
 
     Backoff.with_retry(fn -> Repo.all(conf, query) end)
   end

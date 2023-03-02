@@ -4,6 +4,7 @@ defmodule Oban.Met.RecorderTest do
 
   alias Oban.Met.Recorder
   alias Oban.Met.Values.{Gauge, Sketch}
+  alias Oban.Notifier
 
   @name Oban.Recorder
   @node "worker.1"
@@ -11,7 +12,7 @@ defmodule Oban.Met.RecorderTest do
   describe "lookup/2" do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
-    test "fetching metrics stored with pubsub notifications", %{pid: pid} do
+    test "fetching metrics stored with pubsub notifications", %{conf: conf} do
       metrics = [
         %{series: :a, queue: :default, value: Sketch.new(1), worker: "A"},
         %{series: :b, queue: :default, value: Sketch.new(1), worker: "A"},
@@ -20,20 +21,15 @@ defmodule Oban.Met.RecorderTest do
 
       time = System.system_time(:second)
 
-      payload =
-        %{node: @node, metrics: metrics, time: time}
-        |> Jason.encode!()
-        |> Jason.decode!()
-
-      send(pid, {:notification, :gossip, payload})
-
-      Process.sleep(10)
+      Notifier.notify(conf.name, :gossip, %{node: @node, metrics: metrics, time: time})
 
       labels = %{"node" => @node, "queue" => "default", "worker" => "A"}
 
-      assert [{{"a", ^labels, ^time}, ^time, _}] = lookup(:a)
-      assert [{{"b", ^labels, ^time}, ^time, _}] = lookup(:b)
-      assert [{{"c", ^labels, ^time}, ^time, _}] = lookup(:c)
+      with_backoff(fn ->
+        assert [{{"a", ^labels, ^time}, ^time, _}] = lookup(:a)
+        assert [{{"b", ^labels, ^time}, ^time, _}] = lookup(:b)
+        assert [{{"c", ^labels, ^time}, ^time, _}] = lookup(:c)
+      end)
     end
   end
 
@@ -278,6 +274,52 @@ defmodule Oban.Met.RecorderTest do
       assert length(lookup(:b)) == 2
 
       assert %{"all" => 7} = latest(:a)
+    end
+  end
+
+  describe "handoffs" do
+    setup :start_supervised_oban
+
+    test "broadcasting an online announcement after init", %{conf: conf} do
+      Notifier.listen(conf.name, :handoff)
+
+      start_supervised!({Recorder, conf: conf, name: @name})
+
+      assert_receive {:notification, :handoff, %{"syn" => true, "module" => _}}
+    end
+
+    @tag oban_opts: [peer: Oban.Peers.Isolated, testing: :disabled]
+    test "replying with a handoff message from a leader", %{conf: conf} do
+      Notifier.listen(conf.name, :handoff)
+
+      start_supervised!({Recorder, conf: conf, name: @name})
+
+      assert_receive {:notification, :handoff, %{"syn" => true}}
+
+      # Fake a response from another node
+      Notifier.notify(conf, :handoff, %{syn: true, module: Recorder})
+
+      assert_receive {:notification, :handoff, %{"ack" => true, "data" => _}}
+    end
+
+    @tag oban_opts: [peer: Oban.Peers.Isolated, testing: :disabled]
+    test "replicating the leader's table from the handoff", %{conf: conf} do
+      Notifier.listen(conf.name, :handoff)
+
+      start_supervised!({Recorder, conf: conf, name: @name})
+
+      assert_receive {:notification, :handoff, %{"syn" => true}}
+
+      store(:a, 1, %{"queue" => "alpha"}, time: ts())
+      store(:a, 1, %{"queue" => "gamma"}, time: ts())
+      store(:a, 1, %{"queue" => "delta"}, time: ts())
+
+      {:ok, [conf: conf]} = start_supervised_oban(%{})
+      start_supervised!({Recorder, conf: conf, name: Recorder.B})
+
+      with_backoff(fn ->
+        assert [_, _, _] = Recorder.lookup(Recorder.B, :a)
+      end)
     end
   end
 

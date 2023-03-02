@@ -7,7 +7,7 @@ defmodule Oban.Met.Recorder do
 
   alias __MODULE__, as: State
   alias Oban.Met.{Value, Values.Gauge, Values.Sketch}
-  alias Oban.Notifier
+  alias Oban.{Notifier, Peer}
 
   @type series :: atom() | String.t()
   @type value :: Value.t()
@@ -33,7 +33,8 @@ defmodule Oban.Met.Recorder do
     :conf,
     :name,
     :table,
-    compact_periods: @periods
+    compact_periods: @periods,
+    handoff: :awaiting
   ]
 
   @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
@@ -138,10 +139,24 @@ defmodule Oban.Met.Recorder do
       |> struct!(Keyword.put(opts, :table, table))
       |> schedule_compact()
 
-    Notifier.listen(state.conf.name, [:gossip])
     Registry.register(Oban.Registry, state.name, table)
 
-    {:ok, state}
+    {:ok, state, {:continue, :start}}
+  end
+
+  @impl GenServer
+  def handle_continue(:start, %State{conf: conf} = state) do
+    payload = %{
+      syn: true,
+      module: __MODULE__,
+      name: inspect(conf.name),
+      node: conf.node
+    }
+
+    Notifier.notify(conf.name, :handoff, payload)
+    Notifier.listen(conf.name, [:gossip, :handoff])
+
+    {:noreply, state}
   end
 
   @impl GenServer
@@ -160,7 +175,40 @@ defmodule Oban.Met.Recorder do
   end
 
   @impl GenServer
-  def handle_info({:notification, :gossip, %{"metrics" => _} = payload}, %State{} = state) do
+  def handle_info({:notification, :handoff, %{"syn" => _}}, state) do
+    if Peer.leader?(state.conf) do
+      data =
+        state.table
+        |> :ets.tab2list()
+        |> :erlang.term_to_binary()
+        |> Base.encode64()
+
+      payload = %{
+        ack: true,
+        module: __MODULE__,
+        data: data,
+        node: state.conf.node,
+        name: inspect(state.conf.name)
+      }
+
+      Notifier.notify(state.conf, :handoff, payload)
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info({:notification, :handoff, %{"ack" => _, "data" => data}}, %State{} = state) do
+    if state.handoff == :awaiting and not Peer.leader?(state.conf) do
+      data
+      |> Base.decode64!()
+      |> :erlang.binary_to_term()
+      |> then(&:ets.insert(state.table, &1))
+    end
+
+    {:noreply, %{state | handoff: :complete}}
+  end
+
+  def handle_info({:notification, :gossip, %{"metrics" => _} = payload}, state) do
     %{"metrics" => metrics, "node" => node, "time" => time} = payload
 
     for %{"queue" => queue, "series" => series, "value" => value, "worker" => worker} <- metrics do
@@ -172,7 +220,7 @@ defmodule Oban.Met.Recorder do
     {:noreply, state}
   end
 
-  def handle_info({:notification, :gossip, _payload}, state) do
+  def handle_info({:notification, _channel, _payload}, state) do
     {:noreply, state}
   end
 
