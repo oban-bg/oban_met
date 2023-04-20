@@ -1,24 +1,29 @@
 defmodule Oban.Met.Reporter do
   @moduledoc false
 
-  # Periodically count and report jobs by state, queue, and worker
+  # Periodically count and report jobs by state, queue, and worker.
+  #
+  # Because exact counts are expensive, counts are throttled based on the size of a particular
+  # state. States with fewer than 2,000 jobs are counted every second, but beyond that states are
+  # counted after an exponentially calculated backoff period. This is a tradeoff that aims to
+  # preserve system resources at the expense of accuracy.
 
   use GenServer
 
-  import Ecto.Query, only: [group_by: 3, select: 3]
+  import Ecto.Query, only: [group_by: 3, select: 3, where: 3]
 
   alias __MODULE__, as: State
   alias Oban.{Backoff, Job, Notifier, Peer, Repo}
   alias Oban.Met.Values.Gauge
 
   @empty %{
-    available: 0,
-    cancelled: 0,
-    completed: 0,
-    discarded: 0,
-    executing: 0,
-    retryable: 0,
-    scheduled: 0
+    "available" => {[], nil},
+    "cancelled" => {[], nil},
+    "completed" => {[], nil},
+    "discarded" => {[], nil},
+    "executing" => {[], nil},
+    "retryable" => {[], nil},
+    "scheduled" => {[], nil}
   }
 
   defstruct [:conf, :name, :timer, checks: @empty, interval: :timer.seconds(1)]
@@ -33,6 +38,19 @@ defmodule Oban.Met.Reporter do
   @spec start_link(Keyword.t()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: opts[:name])
+  end
+
+  @doc false
+  def check_backoff(value, opts \\ []) do
+    base = Keyword.get(opts, :factor, 4)
+    clamp = Keyword.get(opts, :clamp, 2_000)
+    limit = Keyword.get(opts, :limit, 1_800)
+
+    exponent = trunc(:math.log10(max(1, value - clamp)))
+
+    (base ** exponent)
+    |> trunc()
+    |> min(limit)
   end
 
   # Callbacks
@@ -59,10 +77,12 @@ defmodule Oban.Met.Reporter do
   @impl GenServer
   def handle_info(:checkpoint, %State{conf: conf} = state) do
     if Peer.leader?(conf.name) do
+      checks = checks(state)
+
       metrics =
-        conf
-        |> counts()
-        |> Enum.map(fn map -> Map.update!(map, :value, &Gauge.new/1) end)
+        for {_key, {counts, _last}} <- checks,
+            count <- counts,
+            do: Map.update!(count, :value, &Gauge.new/1)
 
       payload = %{
         metrics: metrics,
@@ -72,21 +92,49 @@ defmodule Oban.Met.Reporter do
       }
 
       Notifier.notify(conf, :gossip, payload)
-    end
 
-    {:noreply, schedule_checkpoint(state)}
+      {:noreply, schedule_checkpoint(%{state | checks: checks})}
+    else
+      {:noreply, schedule_checkpoint(state)}
+    end
   end
 
   defp schedule_checkpoint(state) do
     %State{state | timer: Process.send_after(self(), :checkpoint, state.interval)}
   end
 
-  defp counts(conf) do
+  defp checks(state) do
+    sysnow = System.system_time(:second)
+
+    states =
+      for {state, {counts, last_at}} <- state.checks,
+          checkable?(counts, last_at, sysnow),
+          do: state
+
     query =
       Job
-      |> group_by([j], [j.state, j.queue, j.worker])
       |> select([j], %{series: j.state, queue: j.queue, worker: j.worker, value: count(j.id)})
+      |> where([j], j.state in ^states)
+      |> group_by([j], [j.state, j.queue, j.worker])
 
-    Backoff.with_retry(fn -> Repo.all(conf, query) end)
+    Backoff.with_retry(fn ->
+      state.conf
+      |> Repo.all(query)
+      |> Enum.group_by(& &1.series)
+      |> Enum.reduce(state.checks, fn {state, counts}, acc ->
+        Map.put(acc, state, {counts, sysnow})
+      end)
+    end)
+  end
+
+  defp checkable?(_counts, nil, _sysnow), do: true
+
+  defp checkable?(counts, last_at, sysnow) do
+    backoff =
+      counts
+      |> Enum.reduce(0, &(&2 + &1.value))
+      |> check_backoff()
+
+    sysnow - backoff >= last_at
   end
 end

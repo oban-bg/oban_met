@@ -1,12 +1,35 @@
 defmodule Oban.Met.ReporterTest do
   use Oban.Met.Case
 
+  use ExUnitProperties
+
   alias Oban.Met.Reporter
   alias Oban.{Job, Notifier}
 
   @name Oban.Reporter
 
   setup :start_supervised_oban
+
+  describe "check_backoff/1" do
+    test "increasing the backoff period for higher counts" do
+      assert 1 = Reporter.check_backoff(0)
+      assert 1 = Reporter.check_backoff(10)
+      assert 1 = Reporter.check_backoff(100)
+      assert 1 = Reporter.check_backoff(1000)
+
+      assert 64 = Reporter.check_backoff(10_000)
+      assert 256 = Reporter.check_backoff(100_000)
+      assert 1024 = Reporter.check_backoff(1_000_000)
+      assert 1800 = Reporter.check_backoff(10_000_000)
+
+      check all count <- positive_integer() do
+        value = Reporter.check_backoff(count)
+
+        assert value > 0
+        assert value < 1800
+      end
+    end
+  end
 
   describe "checkups" do
     @tag oban_opts: [peer: Oban.Peers.Isolated, testing: :disabled]
