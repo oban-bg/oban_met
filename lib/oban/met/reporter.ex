@@ -48,9 +48,7 @@ defmodule Oban.Met.Reporter do
 
     exponent = trunc(:math.log10(max(1, value - clamp)))
 
-    (base ** exponent)
-    |> trunc()
-    |> min(limit)
+    min(limit, trunc(base ** exponent))
   end
 
   # Callbacks
