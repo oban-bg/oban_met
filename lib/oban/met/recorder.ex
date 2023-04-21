@@ -88,6 +88,19 @@ defmodule Oban.Met.Recorder do
     end)
   end
 
+  @spec series(GenServer.name()) :: [map()]
+  def series(name) do
+    match = {{:"$1", :"$2", :_}, :_, :"$3"}
+
+    name
+    |> table()
+    |> :ets.select([{match, [], [:"$$"]}])
+    |> :lists.usort()
+    |> Enum.map(fn [series, labels, %vtype{}] ->
+      %{series: series, labels: Map.keys(labels), type: vtype}
+    end)
+  end
+
   @spec timeslice(GenServer.name(), series(), Keyword.t()) :: [{ts(), value(), label()}]
   def timeslice(name, series, opts \\ []) do
     opts = Keyword.validate!(opts, @default_timeslice_opts)

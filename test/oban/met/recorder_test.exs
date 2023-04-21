@@ -49,6 +49,22 @@ defmodule Oban.Met.RecorderTest do
     end
   end
 
+  describe "series/1" do
+    setup [:start_supervised_oban, :start_supervised_recorder]
+
+    test "fetching details about all stored series" do
+      store(:a, 3, %{"queue" => "alpha"}, time: ts())
+      store(:b, 3, %{"queue" => "gamma"}, time: ts())
+      store(:c, 3, %{"other" => "omega"}, time: ts())
+
+      assert [series_a, series_b, series_c] = Recorder.series(@name)
+
+      assert %{series: "a", labels: ["queue"], type: Gauge} = series_a
+      assert %{series: "b", labels: ["queue"], type: Gauge} = series_b
+      assert %{series: "c", labels: ["other"], type: Gauge} = series_c
+    end
+  end
+
   describe "latest/3" do
     setup [:start_supervised_oban, :start_supervised_recorder]
 
@@ -325,6 +341,8 @@ defmodule Oban.Met.RecorderTest do
 
   defp start_supervised_recorder(%{conf: conf}) do
     pid = start_supervised!({Recorder, conf: conf, name: @name})
+
+    Process.sleep(10)
 
     {:ok, pid: pid}
   end

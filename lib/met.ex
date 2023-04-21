@@ -11,11 +11,12 @@ defmodule Oban.Met do
   @type counts :: %{optional(String.t()) => non_neg_integer()}
   @type sub_counts :: %{optional(String.t()) => non_neg_integer() | counts()}
 
-  @type name_or_table :: GenServer.name() | :ets.table()
   @type series :: atom() | String.t()
   @type value :: Value.t()
   @type label :: String.t()
   @type ts :: integer()
+
+  @type series_detail :: %{series: series(), labels: [label()], value: module()}
 
   @type filter_value :: String.t() | [String.t()]
 
@@ -114,6 +115,26 @@ defmodule Oban.Met do
     oban
     |> Registry.via(Recorder)
     |> Recorder.latest(to_string(series), opts)
+  end
+
+  @doc """
+  List all recorded series along with their labels and value type.
+
+  ## Examples
+
+      Oban.Met.series()
+      [
+        %{series: "exec_time", labels: ["state", "queue", "worker"], value: Sketch},
+        %{series: "wait_time", labels: ["state", "queue", "worker"], value: Sketch},
+        %{series: "exec_count", labels: ["state", "queue", "worker"], value: Gauge},
+        %{series: "full_count", labels: ["state", "queue"], value: Gauge}
+      ]
+  """
+  @spec series(Oban.name()) :: [series_detail()]
+  def series(oban \\ Oban) do
+    oban
+    |> Registry.via(Recorder)
+    |> Recorder.series()
   end
 
   @doc """
