@@ -51,9 +51,9 @@ defmodule Oban.Met.ReporterTest do
       assert %{"name" => _, "node" => "worker.1"} = payload
       assert %{"metrics" => metrics, "time" => _} = payload
 
-      assert ~w(available) = utake(metrics, "series")
+      assert ~w(full_count) = utake(metrics, "series")
+      assert ~w(available) = utake(metrics, "state")
       assert ~w(alpha gamma) = utake(metrics, "queue")
-      assert ~w(Worker.A Worker.B) = utake(metrics, "worker")
     end
 
     @tag oban_opts: [peer: Oban.Peers.Disabled]

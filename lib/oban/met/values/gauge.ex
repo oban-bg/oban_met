@@ -18,9 +18,13 @@ defmodule Oban.Met.Values.Gauge do
       iex> Gauge.new(1).data
       1
   """
-  @spec new(non_neg_integer()) :: t()
+  @spec new(non_neg_integer() | [non_neg_integer()]) :: t()
   def new(data) when is_integer(data) and data > 0 do
     %Gauge{data: data}
+  end
+
+  def new(data) when is_list(data) do
+    %Gauge{data: Enum.sum(data)}
   end
 
   @doc """

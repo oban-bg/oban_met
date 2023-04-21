@@ -13,7 +13,7 @@ defmodule Oban.Met.ListenerTest do
       pid = start_supervised!({Listener, conf: conf, name: @name})
 
       for _ <- 1..3, queue <- ~w(alpha gamma), worker <- ~w(A B C) do
-        meta = %{conf: conf, job: %{queue: queue, worker: worker}}
+        meta = %{conf: conf, job: %{queue: queue, worker: worker}, state: :success}
 
         :telemetry.execute([:oban, :job, :stop], %{duration: 100_000, queue_time: 10_000}, meta)
       end
@@ -26,11 +26,11 @@ defmodule Oban.Met.ListenerTest do
       assert %{"name" => _, "node" => "worker.1"} = payload
       assert %{"metrics" => metrics, "time" => _} = payload
 
-      assert 12 == length(metrics)
-      assert ~w(exec_time wait_time) = utake(metrics, "series")
+      assert 18 == length(metrics)
+      assert ~w(exec_count exec_time wait_time) = utake(metrics, "series")
+      assert ~w(completed) = utake(metrics, "state")
       assert ~w(alpha gamma) = utake(metrics, "queue")
       assert ~w(A B C) = utake(metrics, "worker")
-      assert [%{"value" => %{"size" => 3}} | _] = metrics
     end
   end
 

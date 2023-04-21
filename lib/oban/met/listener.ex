@@ -6,7 +6,7 @@ defmodule Oban.Met.Listener do
   use GenServer
 
   alias __MODULE__, as: State
-  alias Oban.Met.Values.Sketch
+  alias Oban.Met.Values.{Gauge, Sketch}
   alias Oban.Notifier
 
   defstruct [
@@ -87,8 +87,10 @@ defmodule Oban.Met.Listener do
   defp objects_to_metrics(objects) do
     objects
     |> Enum.group_by(&elem(&1, 0), &elem(&1, 2))
-    |> Enum.map(fn {{series, queue, worker}, values} ->
-      %{series: series, queue: queue, worker: worker, value: Sketch.new(values)}
+    |> Enum.map(fn {{series, state, queue, worker}, values} ->
+      value = if series == :exec_count, do: Gauge.new(values), else: Sketch.new(values)
+
+      %{series: series, state: state, queue: queue, worker: worker, value: value}
     end)
   end
 
@@ -107,14 +109,16 @@ defmodule Oban.Met.Listener do
 
   @doc false
   def handle_event([:oban, :job, _], measure, %{conf: conf} = meta, {conf, tab}) do
-    %{job: %{queue: queue, worker: worker}} = meta
+    %{job: %{queue: queue, worker: worker}, state: state} = meta
     %{duration: exec_time, queue_time: wait_time} = measure
 
     time = System.monotonic_time()
+    trst = trans_state(state)
 
     :ets.insert(tab, [
-      {{:exec_time, queue, worker}, time, exec_time},
-      {{:wait_time, queue, worker}, time, wait_time}
+      {{:exec_time, trst, queue, worker}, time, exec_time},
+      {{:wait_time, trst, queue, worker}, time, wait_time},
+      {{:exec_count, trst, queue, worker}, time, 1}
     ])
   end
 
@@ -127,4 +131,14 @@ defmodule Oban.Met.Listener do
 
     %{state | timer: timer}
   end
+
+  # For backward compatibility reasons, the telemetry event's state doesn't match the final job
+  # state. Here we translate the event state to the `t:Oban.Job.state`.
+  defp trans_state(:cancelled), do: :cancelled
+  defp trans_state(:discard), do: :discarded
+  defp trans_state(:exhausted), do: :discarded
+  defp trans_state(:failure), do: :retryable
+  defp trans_state(:snoozed), do: :scheduled
+  defp trans_state(:success), do: :completed
+  defp trans_state(state), do: state
 end

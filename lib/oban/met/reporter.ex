@@ -1,7 +1,7 @@
 defmodule Oban.Met.Reporter do
   @moduledoc false
 
-  # Periodically count and report jobs by state, queue, and worker.
+  # Periodically count and report jobs by state and queue.
   #
   # Because exact counts are expensive, counts are throttled based on the size of a particular
   # state. States with fewer than 2,000 jobs are counted every second, but beyond that states are
@@ -111,14 +111,14 @@ defmodule Oban.Met.Reporter do
 
     query =
       Job
-      |> select([j], %{series: j.state, queue: j.queue, worker: j.worker, value: count(j.id)})
+      |> select([j], %{series: :full_count, state: j.state, queue: j.queue, value: count(j.id)})
       |> where([j], j.state in ^states)
-      |> group_by([j], [j.state, j.queue, j.worker])
+      |> group_by([j], [j.state, j.queue])
 
     Backoff.with_retry(fn ->
       state.conf
       |> Repo.all(query)
-      |> Enum.group_by(& &1.series)
+      |> Enum.group_by(& &1.state)
       |> Enum.reduce(state.checks, fn {state, counts}, acc ->
         Map.put(acc, state, {counts, sysnow})
       end)
