@@ -42,9 +42,9 @@ defmodule Oban.Met.Reporter do
 
   @doc false
   def check_backoff(value, opts \\ []) do
-    base = Keyword.get(opts, :factor, 4)
+    base = Keyword.get(opts, :factor, 3)
     clamp = Keyword.get(opts, :clamp, 2_000)
-    limit = Keyword.get(opts, :limit, 1_800)
+    limit = Keyword.get(opts, :limit, 900)
 
     exponent = trunc(:math.log10(max(1, value - clamp)))
 

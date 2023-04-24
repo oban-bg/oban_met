@@ -17,10 +17,11 @@ defmodule Oban.Met.ReporterTest do
       assert 1 = Reporter.check_backoff(100)
       assert 1 = Reporter.check_backoff(1000)
 
-      assert 64 = Reporter.check_backoff(10_000)
-      assert 256 = Reporter.check_backoff(100_000)
-      assert 1024 = Reporter.check_backoff(1_000_000)
-      assert 1800 = Reporter.check_backoff(10_000_000)
+      assert 27 = Reporter.check_backoff(10_000)
+      assert 81 = Reporter.check_backoff(100_000)
+      assert 243 = Reporter.check_backoff(1_000_000)
+      assert 729 = Reporter.check_backoff(10_000_000)
+      assert 900 = Reporter.check_backoff(100_000_000)
 
       check all count <- positive_integer() do
         value = Reporter.check_backoff(count)
