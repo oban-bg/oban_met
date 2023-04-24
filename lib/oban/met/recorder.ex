@@ -95,10 +95,17 @@ defmodule Oban.Met.Recorder do
     name
     |> table()
     |> :ets.select([{match, [], [:"$$"]}])
-    |> :lists.usort()
-    |> Enum.map(fn [series, labels, %vtype{}] ->
-      %{series: series, labels: Map.keys(labels), type: vtype}
+    |> Enum.group_by(&hd/1)
+    |> Enum.map(fn {series, [[_series, _labels, %vtype{}] | _] = metrics} ->
+      labels =
+        for [_series, labels, _value] <- metrics,
+            key <- Map.keys(labels),
+            uniq: true,
+            do: key
+
+      %{series: series, labels: labels, type: vtype}
     end)
+    |> Enum.sort_by(& &1.series)
   end
 
   @spec timeslice(GenServer.name(), series(), Keyword.t()) :: [{ts(), value(), label()}]
@@ -224,8 +231,11 @@ defmodule Oban.Met.Recorder do
   def handle_info({:notification, :gossip, %{"metrics" => _} = payload}, state) do
     %{"metrics" => metrics, "node" => node, "time" => time} = payload
 
-    for %{"queue" => queue, "series" => series, "value" => value, "worker" => worker} <- metrics do
-      labels = %{"node" => node, "queue" => queue, "worker" => worker}
+    for %{"series" => series, "value" => value} = metric <- metrics do
+      labels =
+        metric
+        |> Map.drop(~w(series value))
+        |> Map.put("node", node)
 
       inner_store(state.table, series, from_map(value), labels, time)
     end
