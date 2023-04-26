@@ -78,6 +78,8 @@ defmodule Oban.Met.ExaminerTest do
       start_supervised!({FakeProducer, queue: "alpha", name: alpha_name, node: Oban})
       start_supervised!({FakeProducer, queue: "omega", name: omega_name, node: Oban})
 
+      Process.sleep(10)
+
       assert_receive {:notification, :gossip, %{"checks" => checks}}
 
       assert [%{"queue" => _}, %{"queue" => _}] = checks
@@ -93,6 +95,8 @@ defmodule Oban.Met.ExaminerTest do
       start_supervised!({FakeProducer, name: fine_name, node: Oban, queue: "fine"})
       start_supervised!({FakeProducer, name: slow_name, node: Oban, queue: "slow", slow: true})
       start_supervised!({FakeProducer, name: kill_name, node: Oban, queue: "kill", kill: true})
+
+      Process.sleep(10)
 
       assert_receive {:notification, :gossip, %{"checks" => [%{"queue" => "fine"}]}}
     end
