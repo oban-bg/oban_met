@@ -28,7 +28,10 @@ defmodule Oban.Met.Application do
 
     if opts[:auto_start] and conf.testing in opts[:auto_testing_modes] do
       case Supervisor.start_child(@supervisor, {Oban.Met, conf: conf}) do
-        {:ok, _child} ->
+        {:ok, _pid} ->
+          :ok
+
+        {:error, {:already_started, _pid}} ->
           :ok
 
         {:error, {error, _stack}} ->
