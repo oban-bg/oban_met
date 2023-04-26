@@ -174,7 +174,7 @@ defmodule Oban.Met.Recorder do
     }
 
     Notifier.notify(conf.name, :handoff, payload)
-    Notifier.listen(conf.name, [:gossip, :handoff])
+    Notifier.listen(conf.name, [:gossip, :handoff, :metrics])
 
     {:noreply, state}
   end
@@ -228,7 +228,7 @@ defmodule Oban.Met.Recorder do
     {:noreply, %{state | handoff: :complete}}
   end
 
-  def handle_info({:notification, :gossip, %{"metrics" => _} = payload}, state) do
+  def handle_info({:notification, :metrics, %{"metrics" => _} = payload}, state) do
     %{"metrics" => metrics, "node" => node, "time" => time} = payload
 
     for %{"series" => series, "value" => value} = metric <- metrics do

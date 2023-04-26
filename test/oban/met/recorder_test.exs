@@ -21,7 +21,7 @@ defmodule Oban.Met.RecorderTest do
 
       time = System.system_time(:second)
 
-      Notifier.notify(conf.name, :gossip, %{node: @node, metrics: metrics, time: time})
+      Notifier.notify(conf.name, :metrics, %{node: @node, metrics: metrics, time: time})
 
       labels = %{"node" => @node, "queue" => "default", "worker" => "A"}
 

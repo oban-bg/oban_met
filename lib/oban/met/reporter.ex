@@ -89,7 +89,7 @@ defmodule Oban.Met.Reporter do
         time: System.system_time(:second)
       }
 
-      Notifier.notify(conf, :gossip, payload)
+      Notifier.notify(conf, :metrics, payload)
 
       {:noreply, schedule_checkpoint(%{state | checks: checks})}
     else

@@ -44,10 +44,10 @@ defmodule Oban.Met.ReporterTest do
 
       Oban.insert_all(conf.name, changesets)
 
-      Notifier.listen(conf.name, [:gossip])
+      Notifier.listen(conf.name, [:metrics])
       send(pid, :checkpoint)
 
-      assert_receive {:notification, :gossip, payload}
+      assert_receive {:notification, :metrics, payload}
 
       assert %{"name" => _, "node" => "worker.1"} = payload
       assert %{"metrics" => metrics, "time" => _} = payload
@@ -61,10 +61,10 @@ defmodule Oban.Met.ReporterTest do
     test "skipping checks when the instance is a follower", %{conf: conf} do
       pid = start_supervised!({Reporter, conf: conf, name: @name})
 
-      Notifier.listen(conf.name, [:gossip])
+      Notifier.listen(conf.name, [:metrics])
       send(pid, :checkpoint)
 
-      refute_receive {:notification, :gossip, _}
+      refute_receive {:notification, :metrics, _}
     end
   end
 

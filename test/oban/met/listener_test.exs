@@ -18,10 +18,10 @@ defmodule Oban.Met.ListenerTest do
         :telemetry.execute([:oban, :job, :stop], %{duration: 100_000, queue_time: 10_000}, meta)
       end
 
-      :ok = Notifier.listen(conf.name, [:gossip])
+      :ok = Notifier.listen(conf.name, [:metrics])
       :ok = Listener.report(pid)
 
-      assert_receive {:notification, :gossip, %{"metrics" => _} = payload}
+      assert_receive {:notification, :metrics, %{"metrics" => _} = payload}
 
       assert %{"name" => _, "node" => "worker.1"} = payload
       assert %{"metrics" => metrics, "time" => _} = payload

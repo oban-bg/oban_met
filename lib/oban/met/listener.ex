@@ -79,7 +79,7 @@ defmodule Oban.Met.Listener do
       time: System.system_time(:second)
     }
 
-    Notifier.notify(conf, :gossip, payload)
+    Notifier.notify(conf, :metrics, payload)
 
     {:noreply, schedule_report(state)}
   end
