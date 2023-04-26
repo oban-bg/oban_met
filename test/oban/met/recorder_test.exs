@@ -290,7 +290,7 @@ defmodule Oban.Met.RecorderTest do
       assert length(lookup(:a)) == 2
       assert length(lookup(:b)) == 2
 
-      assert %{"all" => 7} = latest(:a)
+      assert %{"all" => 7} = latest(:a, lookback: 5)
     end
   end
 

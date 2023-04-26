@@ -21,7 +21,7 @@ defmodule Oban.Met.ListenerTest do
       :ok = Notifier.listen(conf.name, [:gossip])
       :ok = Listener.report(pid)
 
-      assert_receive {:notification, :gossip, payload}
+      assert_receive {:notification, :gossip, %{"metrics" => _} = payload}
 
       assert %{"name" => _, "node" => "worker.1"} = payload
       assert %{"metrics" => metrics, "time" => _} = payload

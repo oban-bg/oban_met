@@ -18,7 +18,7 @@ defmodule Oban.Met.Recorder do
 
   @periods [{1, 120}, {5, 600}, {60, 7_200}]
 
-  @default_latest_opts [filters: [], group: nil, lookback: 5]
+  @default_latest_opts [filters: [], group: nil, lookback: 2]
 
   @default_timeslice_opts [
     by: 1,
@@ -259,9 +259,13 @@ defmodule Oban.Met.Recorder do
   # Table
 
   defp table(name) do
-    [{_pid, table}] = Registry.lookup(Oban.Registry, name)
+    case Registry.lookup(Oban.Registry, name) do
+      [{_pid, table}] ->
+        table
 
-    table
+      _ ->
+        raise RuntimeError, "no table registered for #{inspect(name)}"
+    end
   end
 
   defp inner_compact(table, periods) do
