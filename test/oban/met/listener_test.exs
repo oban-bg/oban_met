@@ -32,6 +32,21 @@ defmodule Oban.Met.ListenerTest do
       assert ~w(alpha gamma) = utake(metrics, "queue")
       assert ~w(A B C) = utake(metrics, "worker")
     end
+
+    test "durations are always converted to positive values", %{conf: conf} do
+      pid = start_supervised!({Listener, conf: conf, name: @name})
+
+      :telemetry.execute(
+        [:oban, :job, :stop],
+        %{duration: -100_000, queue_time: -10_000},
+        %{conf: conf, job: %{queue: "a", worker: "Work"}, state: :success}
+      )
+
+      :ok = Notifier.listen(conf.name, [:metrics])
+      :ok = Listener.report(pid)
+
+      assert_receive {_, :metrics, %{"metrics" => metrics}}
+    end
   end
 
   defp utake(metrics, key) do
