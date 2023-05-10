@@ -115,9 +115,10 @@ defmodule Oban.Met.Listener do
     time = System.monotonic_time()
     trst = trans_state(state)
 
-    # When the VM wakes from sleep jobs report with negative times, which sketches don't allow.
-    exec_time = abs(exec_time)
-    wait_time = abs(wait_time)
+    # Sketches don't support negative times (caused when the VM wakes from sleep), or zero values
+    # (infrequently caused by the same situation).
+    exec_time = exec_time |> abs() |> max(1)
+    wait_time = wait_time |> abs() |> max(1)
 
     :ets.insert(tab, [
       {{:exec_time, trst, queue, worker}, time, exec_time},

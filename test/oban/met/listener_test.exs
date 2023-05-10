@@ -38,14 +38,14 @@ defmodule Oban.Met.ListenerTest do
 
       :telemetry.execute(
         [:oban, :job, :stop],
-        %{duration: -100_000, queue_time: -10_000},
+        %{duration: -100_000, queue_time: 0},
         %{conf: conf, job: %{queue: "a", worker: "Work"}, state: :success}
       )
 
       :ok = Notifier.listen(conf.name, [:metrics])
       :ok = Listener.report(pid)
 
-      assert_receive {_, :metrics, %{"metrics" => metrics}}
+      assert_receive {:notification, :metrics, %{"metrics" => _}}
     end
   end
 
