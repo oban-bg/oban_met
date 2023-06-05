@@ -47,6 +47,17 @@ defmodule Oban.Met.RecorderTest do
       assert ~w(omega) = Recorder.labels(@name, "other")
       assert [] = Recorder.labels(@name, "unknown")
     end
+
+    test "fetching all values for a particular label with a lookback period" do
+      store(:a, 3, %{"queue" => "alpha"}, time: ts(-1))
+      store(:b, 3, %{"queue" => "gamma"}, time: ts(-3))
+      store(:c, 3, %{"queue" => "delta"}, time: ts(-5))
+      store(:d, 3, %{"queue" => "delta"}, time: ts(-7))
+
+      assert ~w(alpha) = Recorder.labels(@name, "queue", lookback: 2)
+      assert ~w(alpha gamma) = Recorder.labels(@name, "queue", lookback: 4)
+      assert ~w(alpha delta gamma) = Recorder.labels(@name, "queue", lookback: 6)
+    end
   end
 
   describe "series/1" do

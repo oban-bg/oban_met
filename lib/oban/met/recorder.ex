@@ -16,7 +16,7 @@ defmodule Oban.Met.Recorder do
   @type ts :: integer()
   @type period :: {pos_integer(), pos_integer()}
 
-  @periods [{1, 120}, {5, 600}, {60, 7_200}]
+  @periods [{1, 300}, {5, 1_200}, {30, 3_600}, {60, 7_200}]
 
   @default_latest_opts [filters: [], group: nil, lookback: 2]
 
@@ -37,14 +37,14 @@ defmodule Oban.Met.Recorder do
     handoff: :awaiting
   ]
 
-  @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
     name = Keyword.get(opts, :name, __MODULE__)
 
     %{super(opts) | id: name}
   end
 
-  @spec start_link(Keyword.t()) :: GenServer.on_start()
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: opts[:name])
   end
@@ -56,10 +56,12 @@ defmodule Oban.Met.Recorder do
     :ets.select_reverse(table(name), [{match, [], [:"$_"]}])
   end
 
-  @spec labels(GenServer.name(), label()) :: [label()]
-  def labels(name, label) when is_binary(label) do
-    match = {{:_, :"$1", :_}, :_, :_}
-    guard = [{:is_map_key, label, :"$1"}]
+  @spec labels(GenServer.name(), label(), keyword()) :: [label()]
+  def labels(name, label, opts \\ []) when is_binary(label) do
+    stime = System.system_time(:second)
+    since = Keyword.get(opts, :lookback, 120)
+    match = {{:_, :"$1", :"$2"}, :_, :_}
+    guard = [{:andalso, {:is_map_key, label, :"$1"}, {:>=, :"$2", stime - since}}]
     value = [{:map_get, label, :"$1"}]
 
     name
@@ -68,17 +70,17 @@ defmodule Oban.Met.Recorder do
     |> :lists.usort()
   end
 
-  @spec latest(GenServer.name(), series(), Keyword.t()) :: %{optional(String.t()) => value()}
+  @spec latest(GenServer.name(), series(), keyword()) :: %{optional(String.t()) => value()}
   def latest(name, series, opts \\ []) do
     opts = Keyword.validate!(opts, @default_latest_opts)
 
     group = Keyword.fetch!(opts, :group)
-    since = Keyword.fetch!(opts, :lookback)
+    lookback = Keyword.fetch!(opts, :lookback)
     filters = Keyword.fetch!(opts, :filters)
 
     name
     |> table()
-    |> select(series, since, filters)
+    |> select(series, lookback, filters)
     |> Enum.dedup_by(fn {{_, labels, _}, _, _} -> labels end)
     |> Enum.group_by(fn {{_, labels, _}, _, _} -> labels[group] || "all" end)
     |> Map.new(fn {group, metrics} ->
@@ -108,22 +110,22 @@ defmodule Oban.Met.Recorder do
     |> Enum.sort_by(& &1.series)
   end
 
-  @spec timeslice(GenServer.name(), series(), Keyword.t()) :: [{ts(), value(), label()}]
+  @spec timeslice(GenServer.name(), series(), keyword()) :: [{ts(), value(), label()}]
   def timeslice(name, series, opts \\ []) do
-    opts = Keyword.validate!(opts, @default_timeslice_opts)
+    opts = Keyword.validate!(opts, [:since] ++ @default_timeslice_opts)
 
     group = Keyword.fetch!(opts, :group)
     ntile = Keyword.fetch!(opts, :ntile)
-    since = Keyword.fetch!(opts, :lookback)
-    slice = Keyword.fetch!(opts, :by)
-    stime = System.system_time(:second)
+    lookback = Keyword.fetch!(opts, :lookback)
+    by = Keyword.fetch!(opts, :by)
+    since = Keyword.get(opts, :since, System.system_time(:second))
 
     name
     |> table()
-    |> select(series, since, opts[:filters])
+    |> select(series, lookback, opts[:filters])
     |> Enum.reduce(%{}, fn {{_, labels, ts}, _, value}, acc ->
       label = labels[group]
-      chunk = div(stime - ts - 1, slice)
+      chunk = div(since - ts - 1, by)
 
       Map.update(acc, {label, chunk}, value, &Value.merge(&1, value))
     end)

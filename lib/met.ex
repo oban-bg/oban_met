@@ -87,8 +87,8 @@ defmodule Oban.Met do
       Oban.Met.labels("worker")
       ~w(MyApp.Worker MyApp.OtherWorker)
   """
-  @spec labels(Oban.name(), label()) :: [label()]
-  def labels(oban \\ Oban, label) do
+  @spec labels(Oban.name(), label(), keyword()) :: [label()]
+  def labels(oban \\ Oban, label, opts \\ []) do
     oban
     |> Registry.via(Recorder)
     |> Recorder.labels(to_string(label))
