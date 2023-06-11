@@ -58,10 +58,12 @@ defmodule Oban.Met.Recorder do
 
   @spec labels(GenServer.name(), label(), keyword()) :: [label()]
   def labels(name, label, opts \\ []) when is_binary(label) do
-    stime = System.system_time(:second)
-    since = Keyword.get(opts, :lookback, 120)
+    opts = Keyword.validate!(opts, [:lookback, :since])
+
+    stime = Keyword.get(opts, :since, System.system_time(:second))
+    lookback = Keyword.get(opts, :lookback, 120)
     match = {{:_, :"$1", :"$2"}, :_, :_}
-    guard = [{:andalso, {:is_map_key, label, :"$1"}, {:>=, :"$2", stime - since}}]
+    guard = [{:andalso, {:is_map_key, label, :"$1"}, {:>=, :"$2", stime - lookback}}]
     value = [{:map_get, label, :"$1"}]
 
     name
@@ -151,6 +153,7 @@ defmodule Oban.Met.Recorder do
   def init(opts) do
     table =
       :ets.new(:metrics, [
+        :compressed,
         :ordered_set,
         :protected,
         read_concurrency: true
