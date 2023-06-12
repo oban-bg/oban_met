@@ -91,7 +91,7 @@ defmodule Oban.Met do
   def labels(oban \\ Oban, label, opts \\ []) do
     oban
     |> Registry.via(Recorder)
-    |> Recorder.labels(to_string(label))
+    |> Recorder.labels(to_string(label), opts)
   end
 
   @doc """
