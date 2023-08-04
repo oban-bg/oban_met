@@ -80,10 +80,10 @@ defmodule Oban.Met.MixProject do
       {:oban, "~> 2.15"},
       {:telemetry, "~> 1.1"},
       {:benchee, "~> 1.0", only: [:test, :dev], runtime: false},
-      {:credo, "~> 1.6", only: [:test, :dev], runtime: false},
-      {:dialyxir, "~> 1.0", only: [:test, :dev], runtime: false},
-      {:postgrex, "~> 0.16", only: [:test, :dev]},
-      {:stream_data, "~> 0.5", only: [:test, :dev]},
+      {:credo, "~> 1.7", only: [:test, :dev], runtime: false},
+      {:dialyxir, "~> 1.3", only: [:test, :dev], runtime: false},
+      {:postgrex, "~> 0.17", only: [:test, :dev]},
+      {:stream_data, "~> 0.6", only: [:test, :dev]},
       {:lys_publish, "~> 0.1",
        only: [:dev], optional: true, runtime: false, path: "../lys_publish"}
     ]

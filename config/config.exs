@@ -9,6 +9,6 @@ config :oban_met, Oban.Met.Repo,
   url: System.get_env("DATABASE_URL") || "postgres://localhost:5432/oban_met_test",
   pool: Ecto.Adapters.SQL.Sandbox
 
-config :logger, level: :warn
+config :logger, level: :warning
 
 config :stream_data, max_runs: 40
