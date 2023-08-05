@@ -11,6 +11,7 @@ defmodule Oban.Met.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      docs: docs(),
       aliases: aliases(),
       package: package(),
       preferred_cli_env: [
@@ -54,7 +55,7 @@ defmodule Oban.Met.MixProject do
     ]
   end
 
-  def aliases do
+  defp aliases do
     [
       release: [
         "cmd git tag v#{@version}",
@@ -79,13 +80,43 @@ defmodule Oban.Met.MixProject do
     [
       {:oban, "~> 2.15"},
       {:telemetry, "~> 1.1"},
+      {:postgrex, "~> 0.17", only: [:test, :dev]},
+      {:stream_data, "~> 0.6", only: [:test, :dev]},
       {:benchee, "~> 1.0", only: [:test, :dev], runtime: false},
       {:credo, "~> 1.7", only: [:test, :dev], runtime: false},
       {:dialyxir, "~> 1.3", only: [:test, :dev], runtime: false},
-      {:postgrex, "~> 0.17", only: [:test, :dev]},
-      {:stream_data, "~> 0.6", only: [:test, :dev]},
-      {:lys_publish, "~> 0.1",
-       only: [:dev], optional: true, runtime: false, path: "../lys_publish"}
+      {:ex_doc, "~> 0.21", only: :dev, runtime: false},
+      {:makeup_diff, "~> 0.1", only: :dev, runtime: false},
+      {:lys_publish, "~> 0.1", only: :dev, path: "../lys_publish", optional: true, runtime: false}
+    ]
+  end
+
+  defp docs do
+    [
+      main: "Oban.Met",
+      source_ref: "v#{@version}",
+      formatters: ["html"],
+      api_reference: false,
+      extra_section: "GUIDES",
+      extras: ["CHANGELOG.md": [filename: "changelog", title: "Changelog"]],
+      groups_for_modules: groups_for_modules(),
+      homepage_url: "/",
+      skip_undefined_reference_warnings_on: ["CHANGELOG.md"],
+      before_closing_body_tag: fn _ ->
+        """
+        <script>document.querySelector('footer.footer p').remove()</script>
+        """
+      end
+    ]
+  end
+
+  defp groups_for_modules do
+    [
+      Values: [
+        Oban.Met.Value,
+        Oban.Met.Values.Gauge,
+        Oban.Met.Values.Sketch
+      ]
     ]
   end
 end
