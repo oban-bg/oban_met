@@ -1,5 +1,5 @@
 defmodule Oban.Met.ExaminerTest do
-  use Oban.Met.Case, async: true
+  use Oban.Met.Case, async: false
 
   alias Oban.Met.Examiner
   alias Oban.{Notifier, Registry}

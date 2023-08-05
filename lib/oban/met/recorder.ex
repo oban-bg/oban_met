@@ -116,10 +116,10 @@ defmodule Oban.Met.Recorder do
   def timeslice(name, series, opts \\ []) do
     opts = Keyword.validate!(opts, [:since] ++ @default_timeslice_opts)
 
-    group = Keyword.fetch!(opts, :group)
-    ntile = Keyword.fetch!(opts, :ntile)
-    lookback = Keyword.fetch!(opts, :lookback)
     by = Keyword.fetch!(opts, :by)
+    group = Keyword.fetch!(opts, :group)
+    lookback = Keyword.fetch!(opts, :lookback)
+    ntile = Keyword.fetch!(opts, :ntile)
     since = Keyword.get(opts, :since, System.system_time(:second))
 
     name

@@ -46,9 +46,15 @@ defmodule Oban.Met.Reporter do
     clamp = Keyword.get(opts, :clamp, 2_000)
     limit = Keyword.get(opts, :limit, 900)
 
-    exponent = trunc(:math.log10(max(1, value - clamp)))
+    exponent =
+      (value - clamp)
+      |> max(1)
+      |> :math.log10()
+      |> trunc()
 
-    min(limit, trunc(base ** exponent))
+    (base ** exponent)
+    |> trunc()
+    |> min(limit)
   end
 
   # Callbacks

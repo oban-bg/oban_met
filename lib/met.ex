@@ -18,15 +18,10 @@ defmodule Oban.Met do
 
   @type series_detail :: %{series: series(), labels: [label()], value: module()}
 
-  @type filter_value :: String.t() | [String.t()]
-
-  @type filter_opts ::
-          {:node, filter_value()}
-          | {:queue, filter_value()}
-          | {:state, filter_value()}
+  @type filter_value :: label() | [label()]
 
   @type latest_opts :: [
-          filters: [filter_opts()],
+          filters: keyword(filter_value()),
           group: String.t(),
           lookback: pos_integer(),
           ntile: float()
@@ -34,7 +29,8 @@ defmodule Oban.Met do
 
   @type timeslice_opts :: [
           by: pos_integer(),
-          filters: [filter_opts()],
+          filters: keyword(filter_value()),
+          group: nil | label(),
           label: :any | String.t(),
           lookback: pos_integer(),
           ntile: float()
@@ -139,6 +135,29 @@ defmodule Oban.Met do
 
   @doc """
   Summarize a series of data with an aggregate over a configurable window of time.
+
+  ## Examples
+
+  Retreive a 3 second timeslice of the `exec_time` sketch:
+
+      Oban.Met.timeslice(Oban, "exec_time", lookback: 3)
+      [
+        {2, 16771374649.128689, nil},
+        {1, 24040058779.3428, nil},
+        {0, 22191534459.516357, nil},
+      ]
+
+  Group `exec_time` slices by the `queue` label:
+
+      Oban.Met.timeslice(Oban, "exec_time", group: "queue")
+      [
+        {1, 9970235387.031698, "analysis"},
+        {0, 11700429279.446463, "analysis"},
+        {1, 23097311376.231316, "default"},
+        {0, 23097311376.231316, "default"},
+        {1, 1520977874.3348415, "events"},
+        {0, 2558504265.2738624, "events"},
+        ...
   """
   @spec timeslice(Oban.name(), series(), timeslice_opts()) :: [{ts(), value(), label()}]
   def timeslice(oban \\ Oban, series, opts \\ []) do
