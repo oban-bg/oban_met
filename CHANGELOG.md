@@ -2,6 +2,16 @@
 
 Initial release!
 
+## v0.1.1 — 2023-08-28
+
+### Bug Fixess
+
+- [Reporter] Reset reported counts whenever they're checkable
+
+  In situations where there wasn't anything new to count, e.g. an empty queue or state, the old
+  checks lingered until there was something to count again. Now any checkable counts are reset to
+  an empty state before storage to ensure we reset back to 0 without new data.
+
 ## v0.1.0 — 2023-08-05
 
 - Telemetry powered metric tracking and aggregation with compaction
