@@ -12,10 +12,10 @@ defmodule Oban.Met.ReporterTest do
 
   describe "check_backoff/1" do
     test "increasing the backoff period for higher counts" do
-      assert 1 = Reporter.check_backoff(0)
-      assert 1 = Reporter.check_backoff(10)
-      assert 1 = Reporter.check_backoff(100)
-      assert 1 = Reporter.check_backoff(1000)
+      assert 0 = Reporter.check_backoff(0)
+      assert 0 = Reporter.check_backoff(10)
+      assert 0 = Reporter.check_backoff(100)
+      assert 0 = Reporter.check_backoff(1000)
 
       assert 27 = Reporter.check_backoff(10_000)
       assert 81 = Reporter.check_backoff(100_000)
@@ -26,8 +26,8 @@ defmodule Oban.Met.ReporterTest do
       check all count <- positive_integer() do
         value = Reporter.check_backoff(count)
 
-        assert value > 0
-        assert value < 1800
+        assert value > -1
+        assert value < 900
       end
     end
   end
@@ -57,6 +57,25 @@ defmodule Oban.Met.ReporterTest do
       assert ~w(alpha gamma) = utake(metrics, "queue")
     end
 
+    @tag oban_opts: [peer: Oban.Peers.Isolated, testing: :disabled]
+    test "resetting checks without any updated counts", %{conf: conf} do
+      pid = start_supervised!({Reporter, conf: conf, name: @name})
+
+      Notifier.listen(conf.name, [:metrics])
+
+      job = Oban.insert!(conf.name, Job.new(%{}, queue: :alpha, worker: Worker.A))
+
+      send(pid, :checkpoint)
+      assert_receive {:notification, :metrics, %{"metrics" => metrics}}
+
+      assert [%{"data" => 1}] = utake(metrics, "value")
+
+      Oban.Repo.delete!(conf, job)
+
+      send(pid, :checkpoint)
+      assert_receive {:notification, :metrics, %{"metrics" => []}}
+    end
+
     @tag oban_opts: [peer: Oban.Peers.Disabled]
     test "skipping checks when the instance is a follower", %{conf: conf} do
       pid = start_supervised!({Reporter, conf: conf, name: @name})
@@ -64,7 +83,7 @@ defmodule Oban.Met.ReporterTest do
       Notifier.listen(conf.name, [:metrics])
       send(pid, :checkpoint)
 
-      refute_receive {:notification, :metrics, _}
+      refute_received {:notification, :metrics, _}
     end
   end
 

@@ -16,17 +16,19 @@ defmodule Oban.Met.Reporter do
   alias Oban.{Backoff, Job, Notifier, Peer, Repo}
   alias Oban.Met.Values.Gauge
 
-  @empty %{
-    "available" => {[], nil},
-    "cancelled" => {[], nil},
-    "completed" => {[], nil},
-    "discarded" => {[], nil},
-    "executing" => {[], nil},
-    "retryable" => {[], nil},
-    "scheduled" => {[], nil}
+  @empty {[], nil}
+
+  @empty_states %{
+    "available" => @empty,
+    "cancelled" => @empty,
+    "completed" => @empty,
+    "discarded" => @empty,
+    "executing" => @empty,
+    "retryable" => @empty,
+    "scheduled" => @empty
   }
 
-  defstruct [:conf, :name, :timer, checks: @empty, interval: :timer.seconds(1)]
+  defstruct [:conf, :name, :timer, checks: @empty_states, interval: :timer.seconds(1)]
 
   @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
   def child_spec(opts) do
@@ -52,9 +54,13 @@ defmodule Oban.Met.Reporter do
       |> :math.log10()
       |> trunc()
 
-    (base ** exponent)
-    |> trunc()
-    |> min(limit)
+    if exponent > 0 do
+      (base ** exponent)
+      |> trunc()
+      |> min(limit)
+    else
+      0
+    end
   end
 
   # Callbacks
@@ -110,10 +116,15 @@ defmodule Oban.Met.Reporter do
   defp checks(state) do
     sysnow = System.system_time(:second)
 
-    states =
-      for {state, {counts, last_at}} <- state.checks,
-          checkable?(counts, last_at, sysnow),
-          do: state
+    {checks, states} =
+      for {state, {counts, last_at}} <- state.checks, reduce: {%{}, []} do
+        {check_acc, state_acc} ->
+          if checkable?(counts, last_at, sysnow) do
+            {Map.put(check_acc, state, @empty), [state | state_acc]}
+          else
+            {Map.put(check_acc, state, {counts, last_at}), state_acc}
+          end
+      end
 
     query =
       Job
@@ -125,7 +136,7 @@ defmodule Oban.Met.Reporter do
       state.conf
       |> Repo.all(query)
       |> Enum.group_by(& &1.state)
-      |> Enum.reduce(state.checks, fn {state, counts}, acc ->
+      |> Enum.reduce(checks, fn {state, counts}, acc ->
         Map.put(acc, state, {counts, sysnow})
       end)
     end)
@@ -137,6 +148,7 @@ defmodule Oban.Met.Reporter do
     backoff =
       counts
       |> Enum.reduce(0, &(&2 + &1.value))
+      |> max(1)
       |> check_backoff()
 
     sysnow - backoff >= last_at
