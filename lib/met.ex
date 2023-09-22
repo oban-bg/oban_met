@@ -16,15 +16,17 @@ defmodule Oban.Met do
   @type label :: String.t()
   @type ts :: integer()
 
+  @type filter_value :: label() | [label()]
+
   @type series_detail :: %{series: series(), labels: [label()], value: module()}
 
-  @type filter_value :: label() | [label()]
+  @type operation :: :max | :sum | {:pct, float()}
 
   @type latest_opts :: [
           filters: keyword(filter_value()),
           group: String.t(),
           lookback: pos_integer(),
-          ntile: float()
+          operation: operation()
         ]
 
   @type timeslice_opts :: [
@@ -33,7 +35,7 @@ defmodule Oban.Met do
           group: nil | label(),
           label: :any | String.t(),
           lookback: pos_integer(),
-          ntile: float()
+          operation: operation()
         ]
 
   @doc false

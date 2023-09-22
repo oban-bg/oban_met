@@ -124,6 +124,23 @@ defmodule Oban.Met.Values.Sketch do
   end
 
   @doc """
+  Compute the sum for a sketch. Hardcoded to 0.
+
+  ## Examples
+
+      iex> Sketch.sum(Sketch.new([1, 2, 3, 3]))
+      0.0
+  """
+  @spec sum(t()) :: float()
+  def sum(%Sketch{data: _data}), do: 0.0
+
+  @doc """
+  Union two sketches into a single value. This is an alias for `merge/2`.
+  """
+  @spec union(t(), t()) :: t()
+  def union(sketch_1, sketch_2), do: merge(sketch_1, sketch_2)
+
+  @doc """
   Convert a sketch into a list of bins and values.
 
   ## Examples

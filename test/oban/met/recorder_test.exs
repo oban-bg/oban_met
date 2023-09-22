@@ -136,6 +136,33 @@ defmodule Oban.Met.RecorderTest do
       assert [12] = timeslice_values(:a, by: 6)
     end
 
+    test "grouping gagues while preserving max value over time" do
+      store(:a, 4, %{"queue" => "alpha"}, time: ts(-1))
+      store(:a, 4, %{"queue" => "alpha"}, time: ts(-1))
+      store(:a, 4, %{"queue" => "gamma"}, time: ts(-1))
+      store(:a, 2, %{"queue" => "gamma"}, time: ts(-1))
+      store(:a, 2, %{"queue" => "alpha"}, time: ts(-0))
+      store(:a, 2, %{"queue" => "alpha"}, time: ts(-0))
+      store(:a, 2, %{"queue" => "gamma"}, time: ts(-0))
+      store(:a, 1, %{"queue" => "gamma"}, time: ts(-0))
+
+      values_for = fn slices, group ->
+        slices
+        |> Enum.filter(&(elem(&1, 2) == group))
+        |> Enum.map(&elem(&1, 1))
+      end
+
+      slices = timeslice(:a, group: "queue", operation: :max, by: 2)
+
+      assert [8] = values_for.(slices, "alpha")
+      assert [6] = values_for.(slices, "gamma")
+
+      slices = timeslice(:a, group: "queue", operation: :sum, by: 2)
+
+      assert [12] = values_for.(slices, "alpha")
+      assert [09] = values_for.(slices, "gamma")
+    end
+
     test "merging grouped gagues through the lookback" do
       store(:a, 6, %{"queue" => "alpha", "node" => "a"}, time: ts(-6))
       store(:a, 6, %{"queue" => "alpha", "node" => "b"}, time: ts(-6))
@@ -172,7 +199,7 @@ defmodule Oban.Met.RecorderTest do
       store(:a, Sketch.new([1]), %{"queue" => "alpha", "node" => "a"}, time: ts(-1))
       store(:a, Sketch.new([3]), %{"queue" => "alpha", "node" => "b"}, time: ts(-1))
 
-      assert [3, 3] = timeslice_values(:a)
+      assert [3, 3] = timeslice_values(:a, operation: {:pct, 1.0})
     end
   end
 

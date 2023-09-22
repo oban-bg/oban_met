@@ -68,7 +68,7 @@ defmodule Oban.Met.ReporterTest do
       send(pid, :checkpoint)
       assert_receive {:notification, :metrics, %{"metrics" => metrics}}
 
-      assert [%{"data" => 1}] = utake(metrics, "value")
+      assert [%{"data" => [1]}] = utake(metrics, "value")
 
       Oban.Repo.delete!(conf, job)
 

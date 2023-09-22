@@ -25,7 +25,7 @@ defmodule Oban.Met.Recorder do
     filters: [],
     group: nil,
     lookback: 60,
-    ntile: 1.0
+    operation: :sum
   ]
 
   defstruct [
@@ -86,9 +86,13 @@ defmodule Oban.Met.Recorder do
     |> Enum.dedup_by(fn {{_, labels, _}, _, _} -> labels end)
     |> Enum.group_by(fn {{_, labels, _}, _, _} -> labels[group] || "all" end)
     |> Map.new(fn {group, metrics} ->
-      merged = Enum.reduce(metrics, 0, fn {_key, _mts, val}, acc -> acc + val.data end)
+      total =
+        metrics
+        |> Enum.map(&elem(&1, 2))
+        |> Enum.reduce(&Value.merge/2)
+        |> Value.sum()
 
-      {group, merged}
+      {group, total}
     end)
   end
 
@@ -119,22 +123,35 @@ defmodule Oban.Met.Recorder do
     by = Keyword.fetch!(opts, :by)
     group = Keyword.fetch!(opts, :group)
     lookback = Keyword.fetch!(opts, :lookback)
-    ntile = Keyword.fetch!(opts, :ntile)
+    operation = Keyword.fetch!(opts, :operation)
     since = Keyword.get(opts, :since, System.system_time(:second))
 
     name
     |> table()
     |> select(series, lookback, opts[:filters])
-    |> Enum.reduce(%{}, fn {{_, labels, ts}, _, value}, acc ->
-      label = labels[group]
-      chunk = div(since - ts - 1, by)
-
-      Map.update(acc, {label, chunk}, value, &Value.merge(&1, value))
-    end)
+    |> Enum.reduce(%{}, &merge_group(&1, &2, group))
+    |> Enum.reduce(%{}, &merge_chunk(&1, &2, since, by))
     |> Enum.sort_by(fn {{label, chunk}, _} -> {label, -chunk} end)
     |> Enum.map(fn {{label, chunk}, value} ->
-      {chunk, Value.quantile(value, ntile), label}
+      value =
+        case operation do
+          :sum -> Value.sum(value)
+          :max -> Value.quantile(value, 1.0)
+          {:pct, ntile} -> Value.quantile(value, ntile)
+        end
+
+      {chunk, value, label}
     end)
+  end
+
+  defp merge_group({{_, labels, ts}, _, value}, acc, group) do
+    Map.update(acc, {labels[group], ts}, value, &Value.union(&1, value))
+  end
+
+  defp merge_chunk({{label, ts}, value}, acc, since, by) do
+    chunk = div(since - ts - 1, by)
+
+    Map.update(acc, {label, chunk}, value, &Value.merge(&1, value))
   end
 
   def compact(name, periods) when is_list(periods) do
@@ -285,9 +302,7 @@ defmodule Oban.Met.Recorder do
       _delete = :ets.select_delete(table, [{match, guard, [true]}])
 
       objects
-      |> Enum.chunk_by(fn {{ser, lab, max}, _, _} ->
-        {ser, lab, div(ts - max - 1, step)}
-      end)
+      |> Enum.chunk_by(fn {{ser, lab, max}, _, _} -> {ser, lab, div(ts - max - 1, step)} end)
       |> Enum.map(&compact_object/1)
       |> then(&:ets.insert(table, &1))
 
@@ -326,7 +341,7 @@ defmodule Oban.Met.Recorder do
 
     value =
       case :ets.select_reverse(table, [{match, [], [:"$1"]}], 1) do
-        {[old_value], _cont} -> Value.merge(old_value, value)
+        {[old_value], _cont} -> Value.union(old_value, value)
         _ -> value
       end
 
