@@ -2,6 +2,16 @@
 
 Initial release!
 
+## v0.1.2 — 2023-09-24
+
+## Enhancements
+
+- [Recorder] Differentiate max/sum/pct operations for timeslice
+
+  Some gauges should be displayed as a sum (exec count) while others should be a maximum (full
+  count). Now timeslicing can differentiate between the two, and values types gained `sum/1` and
+  `union/2` functions to make it possible.
+
 ## v0.1.1 — 2023-08-28
 
 ### Bug Fixess
