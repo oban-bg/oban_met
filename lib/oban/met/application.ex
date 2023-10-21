@@ -12,7 +12,7 @@ defmodule Oban.Met.Application do
   def start(_type, _args) do
     :telemetry.attach(@handler_id, [:oban, :supervisor, :init], &__MODULE__.init_metrics/4, [])
 
-    Supervisor.start_link([], strategy: :one_for_one, name: @supervisor)
+    Supervisor.start_link([{Task, &boot_metrics/0}], strategy: :one_for_one, name: @supervisor)
   end
 
   @impl Application
@@ -23,7 +23,18 @@ defmodule Oban.Met.Application do
   end
 
   @doc false
+  def boot_metrics do
+    Oban.Registry
+    |> Registry.select([{{Oban, :_, :"$1"}, [], [:"$1"]}])
+    |> Enum.each(&start_metrics/1)
+  end
+
+  @doc false
   def init_metrics(_event, _measure, %{conf: conf}, _conf) do
+    start_metrics(conf)
+  end
+
+  defp start_metrics(conf) do
     opts = Application.get_all_env(:oban_met)
 
     if opts[:auto_start] and conf.testing in opts[:auto_testing_modes] do
