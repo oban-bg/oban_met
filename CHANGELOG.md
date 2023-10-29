@@ -2,6 +2,28 @@
 
 Initial release!
 
+## v0.1.3 — 2023-10-29
+
+## Bug Fixes
+
+- [Met] Start `Met` on boot for running oban instances
+
+  It's common for `oban` and `oban_met` to start in separate applications under an umbrella. When
+  `oban_met` started _after_ `oban`, then Met missed the telemetry event and can't start a Met
+  supervisor.
+
+  This adds a task on boot that starts a Met instance for any running Oban isntances.
+
+- [Recorder] Hibernate recorder process after compact cycle
+
+  The `Recorder` process "touches" large batches of JSON received from `Reporter` processes, but
+  it doesn't operate on the data often enough to trigger a full GC. The entire mechanics are
+  explained in [this post][post] on the ElixirForum.
+  
+  Now, the `Recorder` hibernates after compacting to trigger a fullsweep garbage collection.
+  
+  [post]: https://elixirforum.com/t/extremely-high-memory-usage-in-genservers/4035/23
+
 ## v0.1.2 — 2023-09-24
 
 ## Enhancements
