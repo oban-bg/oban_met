@@ -272,7 +272,7 @@ defmodule Oban.Met.Recorder do
   def handle_info(:compact, %State{compact_periods: periods, table: table} = state) do
     inner_compact(table, periods)
 
-    {:noreply, schedule_compact(state)}
+    {:noreply, schedule_compact(state), :hibernate}
   end
 
   defp from_map(%{"size" => _} = value), do: Sketch.from_map(value)
