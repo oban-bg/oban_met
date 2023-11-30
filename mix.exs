@@ -94,12 +94,13 @@ defmodule Oban.Met.MixProject do
 
   defp docs do
     [
-      main: "Oban.Met",
+      main: "overview",
       source_ref: "v#{@version}",
       formatters: ["html"],
       api_reference: false,
       extra_section: "GUIDES",
-      extras: ["CHANGELOG.md": [filename: "changelog", title: "Changelog"]],
+      extras: extras(),
+      groups_for_extras: groups_for_extras(),
       groups_for_modules: groups_for_modules(),
       homepage_url: "/",
       skip_undefined_reference_warnings_on: ["CHANGELOG.md"],
@@ -109,6 +110,18 @@ defmodule Oban.Met.MixProject do
         """
       end
     ]
+  end
+
+  defp extras do
+    [
+      "guides/introduction/overview.md",
+      "guides/introduction/installation.md",
+      "CHANGELOG.md": [filename: "changelog", title: "Changelog"]
+    ]
+  end
+
+  defp groups_for_extras do
+    [Introduction: ~r/guides\/introduction\/.?/]
   end
 
   defp groups_for_modules do
