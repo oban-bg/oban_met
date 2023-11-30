@@ -1,6 +1,6 @@
 # Overview
 
-🏤 Oban.Met supervises a collection of autonomous modules for in-memory, distributed time-series
+🔮 Oban.Met supervises a collection of autonomous modules for in-memory, distributed time-series
 data with zero-configuration. `Oban.Web` relies on `Met` for queue gossip, detailed job counts,
 and historic metrics.
 
