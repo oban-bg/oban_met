@@ -1,7 +1,7 @@
 defmodule Oban.Met.MixProject do
   use Mix.Project
 
-  @version "0.1.3"
+  @version "0.1.4"
 
   def project do
     [
@@ -59,6 +59,7 @@ defmodule Oban.Met.MixProject do
   defp aliases do
     [
       release: [
+        "cmd rm -r doc",
         "cmd git tag v#{@version}",
         "cmd git push",
         "cmd git push --tags",

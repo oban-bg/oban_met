@@ -2,9 +2,20 @@
 
 Initial release!
 
+## v0.1.4 — 2023-12-15
+
+### Bug Fixes
+
+- [Met] Monitor Oban instances and synchronize shutdown.
+
+  Auto-started Met instances may outlive the Oban instance they're linked to, which causes a
+  variety of registry errors when the original process has shutdown. To prevent that, a separate
+  process now monitors the linked Oban supervisor process and coordinates shutting down the Met
+  supervisor.
+
 ## v0.1.3 — 2023-10-29
 
-## Bug Fixes
+### Bug Fixes
 
 - [Met] Start `Met` on boot for running oban instances
 
@@ -26,7 +37,7 @@ Initial release!
 
 ## v0.1.2 — 2023-09-24
 
-## Enhancements
+### Enhancements
 
 - [Recorder] Differentiate max/sum/pct operations for timeslice
 
