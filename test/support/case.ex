@@ -27,7 +27,7 @@ defmodule Oban.Met.Case do
     base_opts = [
       name: name,
       node: "worker.1",
-      notifier: Oban.Notifiers.PG,
+      notifier: Oban.Notifiers.Isolated,
       repo: Oban.Met.Repo,
       testing: :manual
     ]

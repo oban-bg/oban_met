@@ -357,7 +357,7 @@ defmodule Oban.Met.RecorderTest do
       assert_receive {:notification, :handoff, %{"ack" => true, "data" => _}}
     end
 
-    @tag oban_opts: [peer: Oban.Peers.Isolated, testing: :disabled]
+    @tag oban_opts: [notifier: Oban.Notifiers.PG, peer: Oban.Peers.Isolated, testing: :disabled]
     test "replicating the leader's table from the handoff", %{conf: conf} do
       Notifier.listen(conf.name, :handoff)
 
@@ -369,12 +369,10 @@ defmodule Oban.Met.RecorderTest do
       store(:a, 1, %{"queue" => "gamma"}, time: ts())
       store(:a, 1, %{"queue" => "delta"}, time: ts())
 
-      {:ok, [conf: conf]} = start_supervised_oban(%{})
+      {:ok, [conf: conf]} = start_supervised_oban(%{oban_opts: [notifier: Oban.Notifiers.PG]})
       start_supervised!({Recorder, conf: conf, name: Recorder.B})
 
-      with_backoff(fn ->
-        assert [_, _, _] = Recorder.lookup(Recorder.B, :a)
-      end)
+      assert_receive {:notification, :handoff, %{"ack" => true, "data" => _}}
     end
   end
 

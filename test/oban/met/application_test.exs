@@ -1,7 +1,7 @@
 defmodule Oban.Met.Test do
   use Oban.Met.Case
 
-  @opts [notifier: Oban.Notifiers.PG, repo: Oban.Met.Repo]
+  @opts [notifier: Oban.Notifiers.Isolated, repo: Oban.Met.Repo]
 
   setup do
     Application.put_env(:oban_met, :auto_start, true)
