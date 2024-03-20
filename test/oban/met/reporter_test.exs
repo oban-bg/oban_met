@@ -11,23 +11,23 @@ defmodule Oban.Met.ReporterTest do
   setup :start_supervised_oban
 
   describe "check_backoff/1" do
-    test "increasing the backoff period for higher counts" do
-      assert 0 = Reporter.check_backoff(0)
-      assert 0 = Reporter.check_backoff(10)
-      assert 0 = Reporter.check_backoff(100)
-      assert 0 = Reporter.check_backoff(1000)
+    test "clamping backoff for values below 10k" do
+      for value <- [0, 1000, 10_000] do
+        assert 0 == Reporter.check_backoff(value)
+      end
+    end
 
-      assert 27 = Reporter.check_backoff(10_000)
-      assert 81 = Reporter.check_backoff(100_000)
-      assert 243 = Reporter.check_backoff(1_000_000)
-      assert 729 = Reporter.check_backoff(10_000_000)
-      assert 900 = Reporter.check_backoff(100_000_000)
+    test "increasing the backoff period for higher counts" do
+      assert 16 = Reporter.check_backoff(100_000)
+      assert 32 = Reporter.check_backoff(1_000_000)
+      assert 64 = Reporter.check_backoff(10_000_000)
+      assert 128 = Reporter.check_backoff(100_000_000)
 
       check all count <- positive_integer() do
         value = Reporter.check_backoff(count)
 
         assert value > -1
-        assert value < 900
+        assert value < 600
       end
     end
   end
