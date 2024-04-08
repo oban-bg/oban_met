@@ -2,6 +2,23 @@
 
 Initial release!
 
+## v0.1.5 — 2024-04-08
+
+### Enhancements
+
+- [Reporter] Increase count frequency by tweaking backoff times.
+
+  The leader node now counts larger queues and states more frequently than before by using a
+  smaller expontential backoff.
+
+  - The minimum value for clamping is now 10k, 10x larger than it was before.
+  - The exponential factor is now 2 instead of 3, with a maximum of 128s between counts.
+
+- [Met] Add tests and documentation on running `Oban.Met` as an Oban plugin.
+
+  It's possible, even encouraged, to start `Oban.Met` as an Oban plugin in order to avoid
+  auto-start race conditions.
+
 ## v0.1.4 — 2023-12-15
 
 ### Bug Fixes

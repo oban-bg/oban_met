@@ -20,3 +20,12 @@ mode. You can disable auto-starting globally with application configuration:
 ```elixir
 config :oban_met, auto_start: false
 ```
+
+Then, start instances as a child directly within your Oban app's plugins:
+
+```elixir
+plugins: [
+  Oban.Met,
+  ...
+]
+```
