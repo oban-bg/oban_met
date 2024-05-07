@@ -21,7 +21,7 @@ defmodule Oban.Met do
 
   use Supervisor
 
-  alias Oban.Met.{Examiner, Listener, Recorder, Reporter, Value}
+  alias Oban.Met.{Cronitor, Examiner, Listener, Recorder, Reporter, Value}
   alias Oban.Registry
 
   @type counts :: %{optional(String.t()) => non_neg_integer()}
@@ -137,6 +137,30 @@ defmodule Oban.Met do
     oban
     |> Registry.via(Examiner)
     |> Examiner.all_checks()
+  end
+
+  @doc """
+  Get a normalized, unified crontab from all connected nodes.
+
+  ## Examples
+
+  Get a merged crontab:
+
+      Oban.Met.crontab()
+      [
+        {"* * * * *", "Worker.A", []},
+        {"* * * * *", "Worker.B", [["args", %{"mode" => "foo"}]]}
+      ]
+
+  Get the crontab for a non-standard Oban instance:
+
+      Oban.Met.crontab(MyOban)
+  """
+  @spec crontab(Oban.name()) :: [{binary(), binary(), map()}]
+  def crontab(oban \\ Oban) do
+    oban
+    |> Registry.via(Cronitor)
+    |> Cronitor.merged_crontab()
   end
 
   @doc """
@@ -285,6 +309,7 @@ defmodule Oban.Met do
     conf = Keyword.fetch!(opts, :conf)
 
     children = [
+      {Cronitor, conf: conf, name: Registry.via(conf.name, Cronitor)},
       {Examiner, conf: conf, name: Registry.via(conf.name, Examiner)},
       {Recorder, conf: conf, name: Registry.via(conf.name, Recorder)},
       {Listener, conf: conf, name: Registry.via(conf.name, Listener)},
