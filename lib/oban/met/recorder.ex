@@ -51,7 +51,7 @@ defmodule Oban.Met.Recorder do
 
   @spec lookup(GenServer.name(), series()) :: [term()]
   def lookup(name, series) do
-    match = {{to_string(series), :_, :_}, :_, :_}
+    match = {{to_string(series), :_, :_}, :_, :_, :_}
 
     :ets.select_reverse(table(name), [{match, [], [:"$_"]}])
   end
@@ -62,7 +62,7 @@ defmodule Oban.Met.Recorder do
 
     stime = Keyword.get(opts, :since, System.system_time(:second))
     lookback = Keyword.get(opts, :lookback, 120)
-    match = {{:_, :"$1", :"$2"}, :_, :_}
+    match = {{:_, :_, :"$2"}, :_, :"$1", :_}
     guard = [{:andalso, {:is_map_key, label, :"$1"}, {:>=, :"$2", stime - lookback}}]
     value = [{:map_get, label, :"$1"}]
 
@@ -83,12 +83,12 @@ defmodule Oban.Met.Recorder do
     name
     |> table()
     |> select(series, lookback, filters)
-    |> Enum.dedup_by(fn {{_, labels, _}, _, _} -> labels end)
-    |> Enum.group_by(fn {{_, labels, _}, _, _} -> labels[group] || "all" end)
+    |> Enum.dedup_by(fn {{_, _, _}, _, labels, _} -> labels end)
+    |> Enum.group_by(fn {{_, _, _}, _, labels, _} -> labels[group] || "all" end)
     |> Map.new(fn {group, metrics} ->
       total =
         metrics
-        |> Enum.map(&elem(&1, 2))
+        |> Enum.map(&elem(&1, 3))
         |> Enum.reduce(&Value.merge/2)
         |> Value.sum()
 
@@ -98,7 +98,7 @@ defmodule Oban.Met.Recorder do
 
   @spec series(GenServer.name()) :: [map()]
   def series(name) do
-    match = {{:"$1", :"$2", :_}, :_, :"$3"}
+    match = {{:"$1", :_, :_}, :_, :"$2", :"$3"}
 
     name
     |> table()
@@ -144,7 +144,7 @@ defmodule Oban.Met.Recorder do
     end)
   end
 
-  defp merge_group({{_, labels, ts}, _, value}, acc, group) do
+  defp merge_group({{_, _, ts}, _, labels, value}, acc, group) do
     Map.update(acc, {labels[group], ts}, value, &Value.union(&1, value))
   end
 
@@ -295,14 +295,14 @@ defmodule Oban.Met.Recorder do
 
     Enum.reduce(periods, System.system_time(:second), fn {step, duration}, ts ->
       since = ts - duration
-      match = {{:_, :_, :"$1"}, :"$2", :_}
+      match = {{:_, :_, :"$1"}, :"$2", :_, :_}
       guard = [{:andalso, {:>=, :"$2", since}, {:"=<", :"$1", ts}}]
 
       objects = :ets.select(table, [{match, guard, [:"$_"]}])
       _delete = :ets.select_delete(table, [{match, guard, [true]}])
 
       objects
-      |> Enum.chunk_by(fn {{ser, lab, max}, _, _} -> {ser, lab, div(ts - max - 1, step)} end)
+      |> Enum.chunk_by(fn {{ser, lab, max}, _, _, _} -> {ser, lab, div(ts - max - 1, step)} end)
       |> Enum.map(&compact_object/1)
       |> then(&:ets.insert(table, &1))
 
@@ -310,18 +310,18 @@ defmodule Oban.Met.Recorder do
     end)
   end
 
-  defp compact_object([{{series, labels, _}, _, _} | _] = metrics) do
+  defp compact_object([{{series, lab_key, _}, _, labels, _} | _] = metrics) do
     {min_ts, max_ts} =
       metrics
-      |> Enum.flat_map(fn {{_, _, max_ts}, min_ts, _} -> [max_ts, min_ts] end)
+      |> Enum.flat_map(fn {{_, _, max_ts}, min_ts, _, _} -> [max_ts, min_ts] end)
       |> Enum.min_max()
 
     value =
       metrics
-      |> Enum.map(&elem(&1, 2))
+      |> Enum.map(&elem(&1, 3))
       |> Enum.reduce(&Value.merge/2)
 
-    {{series, labels, max_ts}, min_ts, value}
+    {{series, lab_key, max_ts}, min_ts, labels, value}
   end
 
   defp delete_outdated(table, periods) do
@@ -329,23 +329,22 @@ defmodule Oban.Met.Recorder do
     maximum = Enum.reduce(periods, 0, fn {_, duration}, acc -> duration + acc end)
 
     since = systime - maximum
-    match = {{:_, :_, :"$1"}, :_, :_}
+    match = {{:_, :_, :"$1"}, :_, :_, :_}
     guard = [{:<, :"$1", since}]
 
     :ets.select_delete(table, [{match, guard, [true]}])
   end
 
   defp inner_store(table, series, value, labels, time) do
-    key = {to_string(series), labels, time}
-    match = {key, time, :"$1"}
+    key = {to_string(series), :erlang.phash2(labels), time}
 
     value =
-      case :ets.select_reverse(table, [{match, [], [:"$1"]}], 1) do
-        {[old_value], _cont} -> Value.union(old_value, value)
+      case :ets.lookup(table, key) do
+        [{_key, _time, _labels, old_value}] -> Value.union(old_value, value)
         _ -> value
       end
 
-    :ets.insert(table, {key, time, value})
+    :ets.insert(table, {key, time, labels, value})
   end
 
   # Scheduling
@@ -370,7 +369,7 @@ defmodule Oban.Met.Recorder do
 
   defp select(table, series, since, filters) do
     stime = System.system_time(:second)
-    match = {{to_string(series), :"$1", :"$2"}, :_, :_}
+    match = {{to_string(series), :_, :"$2"}, :_, :"$1", :_}
     guard = filters_to_guards(filters, {:>=, :"$2", stime - since})
 
     :ets.select_reverse(table, [{match, [guard], [:"$_"]}])

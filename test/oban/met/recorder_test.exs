@@ -26,9 +26,9 @@ defmodule Oban.Met.RecorderTest do
       labels = %{"node" => @node, "queue" => "default", "worker" => "A"}
 
       with_backoff(fn ->
-        assert [{{"a", ^labels, ^time}, ^time, _}] = lookup(:a)
-        assert [{{"b", ^labels, ^time}, ^time, _}] = lookup(:b)
-        assert [{{"c", ^labels, ^time}, ^time, _}] = lookup(:c)
+        assert [{{"a", _, ^time}, ^time, ^labels, _}] = lookup(:a)
+        assert [{{"b", _, ^time}, ^time, ^labels, _}] = lookup(:b)
+        assert [{{"c", _, ^time}, ^time, ^labels, _}] = lookup(:c)
       end)
     end
   end
@@ -224,7 +224,7 @@ defmodule Oban.Met.RecorderTest do
 
         get_queues = fn metrics ->
           metrics
-          |> get_in([Access.all(), Access.elem(0), Access.elem(1), :queue])
+          |> get_in([Access.all(), Access.elem(2), :queue])
           |> :lists.usort()
         end
 
@@ -244,7 +244,7 @@ defmodule Oban.Met.RecorderTest do
       assert [9, 9, 9] =
                :a
                |> lookup()
-               |> Enum.map(fn {{_key, _lab, max_ts}, min_ts, _} -> max_ts - min_ts end)
+               |> Enum.map(fn {{_, _, max_ts}, min_ts, _, _} -> max_ts - min_ts end)
     end
 
     test "compacted values are separated by series and labels" do
@@ -272,7 +272,7 @@ defmodule Oban.Met.RecorderTest do
       assert [9, 6] =
                :a
                |> lookup()
-               |> Enum.map(fn {_, _, sketch} -> Sketch.size(sketch) end)
+               |> Enum.map(fn {_, _, _, sketch} -> Sketch.size(sketch) end)
     end
 
     test "compacting metrics multiple times is idempotent" do
@@ -296,10 +296,11 @@ defmodule Oban.Met.RecorderTest do
 
       compact([{1, 60}, {1, 60}])
 
-      assert [:gamma, :alpha] =
+      assert [:alpha, :gamma] =
                :a
                |> lookup()
-               |> get_in([Access.all(), Access.elem(0), Access.elem(1), :queue])
+               |> get_in([Access.all(), Access.elem(2), :queue])
+               |> Enum.sort()
     end
   end
 
