@@ -2,6 +2,32 @@
 
 Initial release!
 
+## v0.1.6 — 2024-05-09
+
+### Enhancements
+
+- [Met] Add `Met.crontab/1` for distributed crontab tracking and aggregation.
+
+  The new `Met.crontab/1` function exposes tracked, merged, and normalized crontabs from all
+  connected nodes in a cluster.
+
+- [Examiner] Broadcast queue and cron gossip immediately after init.
+
+  Queue and cron data wasn't broadcast until after the first interval. This was more obvious for
+  cron because it only broadcasts every 15s, but it also benefits queue responsiveness.
+
+### Bug Fixes
+
+- [Recorder] Prevent excessive message queue depth in OTP 26.2.5.
+
+  A bug fix in OTP 26.2.5 made the performance of `:ets.select/3` with a map in the key **much
+  slower**, effectively linear with the number of objects in the able. That performance degredation
+  as enough to bottleneck the `Oban.Met.Recorder` message queue, which bloats the process and may
+  cause OOM errors for active systems.
+
+  This restores, and even improves, the performance of `:ets.select/3` for recorder operations by
+  moving label maps out of the recorded oject key.
+
 ## v0.1.5 — 2024-04-08
 
 ### Enhancements
