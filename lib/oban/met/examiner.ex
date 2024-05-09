@@ -76,17 +76,18 @@ defmodule Oban.Met.Examiner do
     Process.flag(:trap_exit, true)
 
     table = :ets.new(:checks, [:public, read_concurrency: true])
-
-    state =
-      State
-      |> struct!(Keyword.put(opts, :table, table))
-      |> schedule_check()
+    state = struct!(State, Keyword.put(opts, :table, table))
 
     Notifier.listen(state.conf.name, [:gossip])
 
     Registry.register(Oban.Registry, state.name, table)
 
-    {:ok, state}
+    {:ok, state, {:continue, :start}}
+  end
+
+  @impl GenServer
+  def handle_continue(:start, %State{} = state) do
+    handle_info(:check, state)
   end
 
   @impl GenServer

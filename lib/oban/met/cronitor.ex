@@ -1,13 +1,6 @@
 defmodule Oban.Met.Cronitor do
   @moduledoc false
 
-  # - Web can't request the crontab, because it doesn't run on every node.
-  # - OSS could do it, but those types of plugins (gossip) are deprecated.
-  # - Therefore `met` has to do it, and it must be based on periodic tracking.
-
-  # - Some nodes may have no crontab
-  # - Some nodes may have a partial crontab, either through restart or purposefully
-
   use GenServer
 
   alias __MODULE__, as: State
@@ -50,7 +43,12 @@ defmodule Oban.Met.Cronitor do
 
     Notifier.listen(state.conf.name, [:cronitor])
 
-    {:ok, schedule_share(state)}
+    {:ok, state, {:continue, :start}}
+  end
+
+  @impl GenServer
+  def handle_continue(:start, %State{} = state) do
+    handle_info(:share, state)
   end
 
   @impl GenServer
