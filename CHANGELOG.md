@@ -2,6 +2,14 @@
 
 Initial release!
 
+## v0.1.7 — 2024-06-20
+
+- [Recorder] Explicitly trigger garbage collection after compaction.
+
+  Hibernating doesn't guarantee garbage collection in a highly active system. Now the `Recorder`
+  process triggers garbage collection after it compacts stored metrics to ensure retained binaries
+  are released.
+
 ## v0.1.6 — 2024-05-09
 
 ### Enhancements
