@@ -322,9 +322,15 @@ defmodule Oban.Met.RecorderTest do
       assert length(lookup(:a)) == 4
       assert length(lookup(:b)) == 3
 
+      {:heap_size, heap_1} = :erlang.process_info(pid, :heap_size)
+
       send(pid, :compact)
 
       Process.sleep(10)
+
+      {:heap_size, heap_2} = :erlang.process_info(pid, :heap_size)
+
+      assert heap_1 >= heap_2
 
       assert length(lookup(:a)) == 2
       assert length(lookup(:b)) == 2

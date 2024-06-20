@@ -272,6 +272,8 @@ defmodule Oban.Met.Recorder do
   def handle_info(:compact, %State{compact_periods: periods, table: table} = state) do
     inner_compact(table, periods)
 
+    :erlang.garbage_collect()
+
     {:noreply, schedule_compact(state), :hibernate}
   end
 
