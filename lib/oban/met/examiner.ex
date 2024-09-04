@@ -11,6 +11,8 @@ defmodule Oban.Met.Examiner do
   alias __MODULE__, as: State
   alias Oban.Notifier
 
+  require Logger
+
   @type name_or_table :: :ets.tab() | GenServer.name()
 
   defstruct [
@@ -122,6 +124,16 @@ defmodule Oban.Met.Examiner do
   end
 
   def handle_info({:notification, :gossip, _payload}, state) do
+    {:noreply, state}
+  end
+
+  def handle_info(message, state) do
+    Logger.warning(
+      message: "Received unexpected message: #{inspect(message)}",
+      source: :oban_met,
+      module: __MODULE__
+    )
+
     {:noreply, state}
   end
 
