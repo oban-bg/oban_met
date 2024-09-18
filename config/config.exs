@@ -1,6 +1,6 @@
 import Config
 
-config :oban_met, auto_start: false
+config :oban_met, auto_start: false, reporter: [estimate_limit: 1000]
 
 config :oban_met, ecto_repos: [Oban.Pro.Repo]
 

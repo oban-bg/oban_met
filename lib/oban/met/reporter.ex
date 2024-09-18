@@ -45,16 +45,16 @@ defmodule Oban.Met.Reporter do
 
   @spec start_link(Keyword.t()) :: GenServer.on_start()
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: opts[:name])
+    state = struct!(State, opts)
+
+    GenServer.start_link(__MODULE__, state, name: opts[:name])
   end
 
   # Callbacks
 
   @impl GenServer
-  def init(opts) do
+  def init(state) do
     Process.flag(:trap_exit, true)
-
-    state = struct!(State, opts)
 
     # Used to ensure testing helpers to auto-allow this module for sandbox access.
     :telemetry.execute([:oban, :plugin, :init], %{}, %{conf: state.conf, plugin: __MODULE__})
