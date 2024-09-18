@@ -3,32 +3,38 @@ defmodule Oban.Met.Reporter do
 
   # Periodically count and report jobs by state and queue.
   #
-  # Because exact counts are expensive, counts are throttled based on the size of a particular
-  # state. States with fewer than 2,000 jobs are counted every second, but beyond that states are
-  # counted after an exponentially calculated backoff period. This is a tradeoff that aims to
-  # preserve system resources at the expense of accuracy.
+  # Because exact counts are expensive, counts for states with jobs beyond a configurable
+  # threshold are estimated. This is a tradeoff that aims to preserve system resources at the
+  # expense of accuracy.
 
   use GenServer
 
-  import Ecto.Query, only: [group_by: 3, select: 3, where: 3]
+  import Ecto.Query, only: [from: 2, group_by: 3, select: 3, where: 3]
 
   alias __MODULE__, as: State
-  alias Oban.{Backoff, Job, Notifier, Peer, Repo}
+  alias Oban.{Job, Notifier, Peer, Repo}
   alias Oban.Met.Values.Gauge
 
-  @empty {[], nil}
-
   @empty_states %{
-    "available" => @empty,
-    "cancelled" => @empty,
-    "completed" => @empty,
-    "discarded" => @empty,
-    "executing" => @empty,
-    "retryable" => @empty,
-    "scheduled" => @empty
+    "available" => [],
+    "cancelled" => [],
+    "completed" => [],
+    "discarded" => [],
+    "executing" => [],
+    "retryable" => [],
+    "scheduled" => []
   }
 
-  defstruct [:conf, :name, :timer, checks: @empty_states, interval: :timer.seconds(1)]
+  defstruct [
+    :conf,
+    :name,
+    :queue_timer,
+    :check_timer,
+    checks: @empty_states,
+    check_interval: :timer.seconds(1),
+    estimate_limit: 50_000,
+    function_created?: false
+  ]
 
   @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
   def child_spec(opts) do
@@ -42,27 +48,6 @@ defmodule Oban.Met.Reporter do
     GenServer.start_link(__MODULE__, opts, name: opts[:name])
   end
 
-  @doc false
-  def check_backoff(value, opts \\ []) do
-    base = Keyword.get(opts, :factor, 2)
-    clamp = Keyword.get(opts, :clamp, 10_000)
-    limit = Keyword.get(opts, :limit, 600)
-
-    exponent =
-      (value - clamp)
-      |> max(1)
-      |> :math.log10()
-      |> trunc()
-
-    if exponent > 0 do
-      (base ** exponent)
-      |> trunc()
-      |> min(limit)
-    else
-      0
-    end
-  end
-
   # Callbacks
 
   @impl GenServer
@@ -74,12 +59,12 @@ defmodule Oban.Met.Reporter do
     # Used to ensure testing helpers to auto-allow this module for sandbox access.
     :telemetry.execute([:oban, :plugin, :init], %{}, %{conf: state.conf, plugin: __MODULE__})
 
-    {:ok, schedule_checkpoint(state)}
+    {:ok, schedule_checks(state)}
   end
 
   @impl GenServer
-  def terminate(_reason, %State{timer: timer}) do
-    if is_reference(timer), do: Process.cancel_timer(timer)
+  def terminate(_reason, %State{} = state) do
+    if is_reference(state.check_timer), do: Process.cancel_timer(state.check_timer)
 
     :ok
   end
@@ -87,10 +72,12 @@ defmodule Oban.Met.Reporter do
   @impl GenServer
   def handle_info(:checkpoint, %State{conf: conf} = state) do
     if Peer.leader?(conf.name) do
-      checks = checks(state)
+      state = create_estimate_function(state)
+
+      {:ok, checks} = checks(state)
 
       metrics =
-        for {_key, {counts, _last}} <- checks,
+        for {_key, counts} <- checks,
             count <- counts,
             do: Map.update!(count, :value, &Gauge.new/1)
 
@@ -103,54 +90,98 @@ defmodule Oban.Met.Reporter do
 
       Notifier.notify(conf, :metrics, payload)
 
-      {:noreply, schedule_checkpoint(%{state | checks: checks})}
+      {:noreply, schedule_checks(%{state | checks: checks})}
     else
-      {:noreply, schedule_checkpoint(state)}
+      {:noreply, schedule_checks(state)}
     end
   end
 
-  defp schedule_checkpoint(state) do
-    %State{state | timer: Process.send_after(self(), :checkpoint, state.interval)}
+  # Scheduling
+
+  defp schedule_checks(state) do
+    timer = Process.send_after(self(), :checkpoint, state.check_interval)
+
+    %State{state | check_timer: timer}
   end
 
-  defp checks(state) do
-    sysnow = System.system_time(:second)
+  # Checking
 
-    {checks, states} =
-      for {state, {counts, last_at}} <- state.checks, reduce: {%{}, []} do
-        {check_acc, state_acc} ->
-          if checkable?(counts, last_at, sysnow) do
-            {Map.put(check_acc, state, @empty), [state | state_acc]}
+  # An `EXPLAIN` can only be executed as the top level of a query, or through an SQL function's
+  # EXECUTE as we're doing here. A named function helps the performance because it is prepared,
+  # and we have to support distributed databases that don't allow DO/END functions.
+  defp create_estimate_function(%{conf: conf, function_created?: false} = state) do
+    query = """
+    CREATE OR REPLACE FUNCTION #{conf.prefix}.oban_count_estimate(state text, queue text)
+    RETURNS integer AS $func$
+    DECLARE
+      plan jsonb;
+    BEGIN
+      EXECUTE 'EXPLAIN (FORMAT JSON) SELECT id FROM oban_jobs WHERE state = $1::oban_job_state and queue = $2'
+        INTO plan
+        USING state, queue;
+      RETURN plan->0->'Plan'->'Plan Rows';
+    END;
+    $func$
+    LANGUAGE plpgsql 
+    SET search_path FROM CURRENT
+    """
+
+    Repo.query!(conf, query, [])
+
+    %{state | function_created?: true}
+  end
+
+  defp create_estimate_function(state), do: state
+
+  defp checks(%{estimate_limit: limit} = state) do
+    {count_states, guess_states} =
+      for {state, counts} <- state.checks, reduce: {[], []} do
+        {count_acc, guess_acc} ->
+          total = Enum.reduce(counts, 0, &(&2 + &1.value))
+
+          if total < limit do
+            {[state | count_acc], guess_acc}
           else
-            {Map.put(check_acc, state, {counts, last_at}), state_acc}
+            {count_acc, [state | guess_acc]}
           end
       end
 
-    query =
-      Job
-      |> select([j], %{series: :full_count, state: j.state, queue: j.queue, value: count(j.id)})
-      |> where([j], j.state in ^states)
-      |> group_by([j], [j.state, j.queue])
+    count_query = count_query(count_states)
+    guess_query = guess_query(guess_states, state.conf)
 
-    Backoff.with_retry(fn ->
-      state.conf
-      |> Repo.all(query)
+    Repo.transaction(state.conf, fn ->
+      count_counts = Repo.all(state.conf, count_query)
+      guess_counts = Repo.all(state.conf, guess_query)
+
+      (count_counts ++ guess_counts)
       |> Enum.group_by(& &1.state)
-      |> Enum.reduce(checks, fn {state, counts}, acc ->
-        Map.put(acc, state, {counts, sysnow})
+      |> Enum.reduce(@empty_states, fn {state, counts}, acc ->
+        Map.put(acc, state, counts)
       end)
     end)
   end
 
-  defp checkable?(_counts, nil, _sysnow), do: true
+  defp count_query(states) do
+    Job
+    |> select([j], %{series: :full_count, state: j.state, queue: j.queue, value: count(j.id)})
+    |> where([j], j.state in ^states)
+    |> group_by([j], [j.state, j.queue])
+  end
 
-  defp checkable?(counts, last_at, sysnow) do
-    backoff =
-      counts
-      |> Enum.reduce(0, &(&2 + &1.value))
-      |> max(1)
-      |> check_backoff()
+  # Pulling the distinct queues from oban_producers is _much_ faster than doing it from oban_jobs,
+  # but we can only do it for the Smart engine.
+  defp guess_query(states, conf) do
+    source = if conf.engine == Oban.Pro.Engines.Smart, do: "oban_producers", else: "oban_jobs"
 
-    sysnow - backoff >= last_at
+    from(p in source,
+      cross_join: x in fragment("json_array_elements_text(?)", ^states),
+      group_by: [x.value, p.queue],
+      select: %{
+        series: :full_count,
+        state: x.value,
+        queue: p.queue,
+        value: fragment("oban_count_estimate(?, ?)", x.value, p.queue)
+      }
+    )
   end
 end
