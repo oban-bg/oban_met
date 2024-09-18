@@ -2,7 +2,36 @@
 
 Initial release!
 
+## v0.1.8 — 2024-09-18
+
+### Enhancements
+
+- [Reporter] Use count estimates for larger states.
+
+  Counting is an expensive operation, even when it's optimized to use an index. In systems with
+  even 1m jobs counting can take 200-400ms for each query. Previously, the reporter used a backoff
+  mechanism to count less frequently when a state like `completed` had more than 10k jobs. The
+  backoff increased based on the number of jobs, but it didn't always match the performance impact
+  for a database.
+
+  The new mechanism uses an estimate query for any state with more than a configurable number of
+  jobs, 50k by default. The estimate is extremely fast at the expense of accuracy. For larger
+  values the inaccuracy doesn't matter because we display a rounded value anyhow.
+
+  The threshold can be configured through the application environment. For example, to increase
+  the minimum to 100k before it starts estimating:
+
+  ```elixir
+  config :oban_met, reporter: [estimate_limit: 100_000]
+  ```
+
+### Bug Fixes
+
+- [Examiner] Add catch-all `handle_info` clause to prevent crashing with unexpected notifications.
+
 ## v0.1.7 — 2024-06-20
+
+### Bug Fixes
 
 - [Recorder] Explicitly trigger garbage collection after compaction.
 
