@@ -116,14 +116,17 @@ defmodule Oban.Met.Reporter do
     DECLARE
       plan jsonb;
     BEGIN
-      EXECUTE 'EXPLAIN (FORMAT JSON) SELECT id FROM oban_jobs WHERE state = $1::oban_job_state and queue = $2'
+      EXECUTE 'EXPLAIN (FORMAT JSON)
+               SELECT id
+               FROM #{conf.prefix}.oban_jobs
+               WHERE state = $1::#{conf.prefix}.oban_job_state
+               AND queue = $2'
         INTO plan
         USING state, queue;
       RETURN plan->0->'Plan'->'Plan Rows';
     END;
     $func$
     LANGUAGE plpgsql 
-    SET search_path FROM CURRENT
     """
 
     Repo.query!(conf, query, [])

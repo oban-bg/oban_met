@@ -1,7 +1,7 @@
 defmodule Oban.Met.ReporterTest do
   use Oban.Met.Case
 
-  alias Oban.Met.Reporter
+  alias Oban.Met.{Repo, Reporter}
   alias Oban.{Job, Notifier}
 
   @name Oban.Reporter
@@ -31,6 +31,23 @@ defmodule Oban.Met.ReporterTest do
       assert ~w(full_count) = utake(metrics, "series")
       assert ~w(available) = utake(metrics, "state")
       assert ~w(alpha gamma) = utake(metrics, "queue")
+    end
+
+    @tag oban_opts: [peer: Oban.Peers.Isolated, prefix: "private", testing: :disabled]
+    test "reporting queried counts for an alternate prefix", %{conf: conf} do
+      Repo.query!("ALTER TABLE oban_jobs RENAME TO _oban_jobs", [])
+
+      pid = start_supervised!({Reporter, conf: conf, name: @name, estimate_limit: 0})
+
+      Oban.insert!(conf.name, Job.new(%{}, queue: "alpha", worker: "Worker.A"))
+
+      Notifier.listen(conf.name, [:metrics])
+
+      send(pid, :checkpoint)
+
+      assert_receive {:notification, :metrics, %{"metrics" => _metrics}}
+    after
+      Repo.query!("ALTER TABLE _oban_jobs RENAME TO oban_jobs", [])
     end
 
     @tag oban_opts: [peer: Oban.Peers.Isolated, testing: :disabled]
