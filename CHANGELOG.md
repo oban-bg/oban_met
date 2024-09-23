@@ -2,6 +2,15 @@
 
 Initial release!
 
+## v0.1.9 — 2024-09-23
+
+### Bug Fixes
+
+- [Reporter] Use the correct prefixed count estimate function.
+
+  A function was created in the correct prefix, but the query didn't automatically select that
+  version of the function. This adds an explicit reference to the configured prefixed function.
+
 ## v0.1.8 — 2024-09-18
 
 ### Enhancements
