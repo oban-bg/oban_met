@@ -32,7 +32,7 @@ defmodule Oban.Met.Reporter do
     :check_timer,
     checks: @empty_states,
     check_interval: :timer.seconds(1),
-    estimate_limit: 50_000,
+    estimate_limit: 100,
     function_created?: false
   ]
 
@@ -180,7 +180,7 @@ defmodule Oban.Met.Reporter do
         series: :full_count,
         state: x.value,
         queue: p.queue,
-        value: fragment("oban_count_estimate(?, ?)", x.value, p.queue)
+        value: fragment("?.oban_count_estimate(?, ?)", literal(^conf.prefix), x.value, p.queue)
       }
     )
   end
