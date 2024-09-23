@@ -32,7 +32,7 @@ defmodule Oban.Met.Reporter do
     :check_timer,
     checks: @empty_states,
     check_interval: :timer.seconds(1),
-    estimate_limit: 100,
+    estimate_limit: 50_000,
     function_created?: false
   ]
 
