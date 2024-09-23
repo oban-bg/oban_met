@@ -2,6 +2,16 @@
 
 Initial release!
 
+## v0.1.10 — 2024-09-23
+
+### Bug Fixes
+
+- [Reporter] Explicitly prefix jobs table and state in estimate.
+
+  The previous correction wasn't enough for systems that lack a jobs table in the public schema.
+  The current search path doesn't propagate to the table or state enum in the estimate function.
+  This explicitly uses the prefix internally to ensure the correct table and state are queried.
+
 ## v0.1.9 — 2024-09-23
 
 ### Bug Fixes
