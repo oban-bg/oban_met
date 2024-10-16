@@ -40,12 +40,16 @@ defmodule Oban.Met.ReporterTest do
       pid = start_supervised!({Reporter, conf: conf, name: @name, estimate_limit: 0})
 
       Oban.insert!(conf.name, Job.new(%{}, queue: "alpha", worker: "Worker.A"))
+      Oban.insert!(conf.name, Job.new(%{}, queue: "gamma", worker: "Worker.B"))
 
       Notifier.listen(conf.name, [:metrics])
 
       send(pid, :checkpoint)
 
-      assert_receive {:notification, :metrics, %{"metrics" => _metrics}}
+      assert_receive {:notification, :metrics, %{"metrics" => metrics}}
+
+      assert "available" in utake(metrics, "state")
+      assert ~w(alpha gamma) = utake(metrics, "queue")
     after
       Repo.query!("ALTER TABLE _oban_jobs RENAME TO oban_jobs", [])
     end

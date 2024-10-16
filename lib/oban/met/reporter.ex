@@ -14,6 +14,7 @@ defmodule Oban.Met.Reporter do
   alias __MODULE__, as: State
   alias Oban.{Job, Notifier, Peer, Repo}
   alias Oban.Met.Values.Gauge
+  alias Oban.Pro.Engines.Smart
 
   @empty_states %{
     "available" => [],
@@ -31,9 +32,11 @@ defmodule Oban.Met.Reporter do
     :queue_timer,
     :check_timer,
     checks: @empty_states,
+    check_counter: 0,
     check_interval: :timer.seconds(1),
     estimate_limit: 50_000,
-    function_created?: false
+    function_created?: false,
+    queues: []
   ]
 
   @spec child_spec(Keyword.t()) :: Supervisor.child_spec()
@@ -72,7 +75,10 @@ defmodule Oban.Met.Reporter do
   @impl GenServer
   def handle_info(:checkpoint, %State{conf: conf} = state) do
     if Peer.leader?(conf.name) do
-      state = create_estimate_function(state)
+      state =
+        state
+        |> create_estimate_function()
+        |> cache_queues()
 
       {:ok, checks} = checks(state)
 
@@ -90,7 +96,8 @@ defmodule Oban.Met.Reporter do
 
       Notifier.notify(conf, :metrics, payload)
 
-      {:noreply, schedule_checks(%{state | checks: checks})}
+      {:noreply,
+       schedule_checks(%{state | check_counter: state.check_counter + 1, checks: checks})}
     else
       {:noreply, schedule_checks(state)}
     end
@@ -136,6 +143,17 @@ defmodule Oban.Met.Reporter do
 
   defp create_estimate_function(state), do: state
 
+  defp cache_queues(state) do
+    if Integer.mod(state.check_counter, 60) == 0 do
+      source = if state.conf.engine == Smart, do: "oban_producers", else: "oban_jobs"
+      query = from(p in source, select: p.queue, distinct: true)
+
+      %{state | queues: Repo.all(state.conf, query)}
+    else
+      state
+    end
+  end
+
   defp checks(%{estimate_limit: limit} = state) do
     {count_states, guess_states} =
       for {state, counts} <- state.checks, reduce: {[], []} do
@@ -150,7 +168,7 @@ defmodule Oban.Met.Reporter do
       end
 
     count_query = count_query(count_states)
-    guess_query = guess_query(guess_states, state.conf)
+    guess_query = guess_query(guess_states, state.queues, state.conf)
 
     Repo.transaction(state.conf, fn ->
       count_counts = Repo.all(state.conf, count_query)
@@ -171,19 +189,14 @@ defmodule Oban.Met.Reporter do
     |> group_by([j], [j.state, j.queue])
   end
 
-  # Pulling the distinct queues from oban_producers is _much_ faster than doing it from oban_jobs,
-  # but we can only do it for the Smart engine.
-  defp guess_query(states, conf) do
-    source = if conf.engine == Oban.Pro.Engines.Smart, do: "oban_producers", else: "oban_jobs"
-
-    from(p in source,
+  defp guess_query(states, queues, conf) do
+    from(p in fragment("json_array_elements_text(?)", ^queues),
       cross_join: x in fragment("json_array_elements_text(?)", ^states),
-      group_by: [x.value, p.queue],
       select: %{
         series: :full_count,
         state: x.value,
-        queue: p.queue,
-        value: fragment("?.oban_count_estimate(?, ?)", literal(^conf.prefix), x.value, p.queue)
+        queue: p.value,
+        value: fragment("?.oban_count_estimate(?, ?)", literal(^conf.prefix), x.value, p.value)
       }
     )
   end
