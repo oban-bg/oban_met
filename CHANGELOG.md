@@ -2,6 +2,16 @@
 
 Initial release!
 
+## v0.1.11 — 2024-10-16
+
+### Enhancements
+
+- [Reporter] Speed up estimates by caching queues.
+
+  Pulling queue names from the `oban_jobs` table causes needlessly expensive sequential scans. Now
+  queue names are extracted periodically and used directly for estimates. The same optimization is
+  applied to the `oban_producers` table, when available, for a minor performance boost.
+
 ## v0.1.10 — 2024-09-23
 
 ### Bug Fixes
