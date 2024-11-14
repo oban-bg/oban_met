@@ -182,14 +182,19 @@ defmodule Oban.Met.Reporter do
     end)
   end
 
-  defp count_query(states) do
+  defp count_query([]), do: where(Job, [_], false)
+
+  defp count_query(states) when is_list(states) do
     Job
     |> select([j], %{series: :full_count, state: j.state, queue: j.queue, value: count(j.id)})
     |> where([j], j.state in ^states)
     |> group_by([j], [j.state, j.queue])
   end
 
-  defp guess_query(states, queues, conf) do
+  defp guess_query([], _queues, _conf), do: where(Job, [_], false)
+  defp guess_query(_states, [], _conf), do: where(Job, [_], false)
+
+  defp guess_query(states, queues, conf) when is_list(states) and is_list(queues) do
     from(p in fragment("json_array_elements_text(?)", ^queues),
       cross_join: x in fragment("json_array_elements_text(?)", ^states),
       select: %{
