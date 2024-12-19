@@ -31,6 +31,7 @@ defmodule Oban.Met.Reporter do
     :name,
     :queue_timer,
     :check_timer,
+    auto_migrate: true,
     checks: @empty_states,
     check_counter: 0,
     check_interval: :timer.seconds(1),
@@ -116,17 +117,17 @@ defmodule Oban.Met.Reporter do
   # An `EXPLAIN` can only be executed as the top level of a query, or through an SQL function's
   # EXECUTE as we're doing here. A named function helps the performance because it is prepared,
   # and we have to support distributed databases that don't allow DO/END functions.
-  defp create_estimate_function(%{conf: conf, function_created?: false} = state) do
+  defp create_estimate_function(%{auto_migrate: true, function_created?: false} = state) do
     query = """
-    CREATE OR REPLACE FUNCTION #{conf.prefix}.oban_count_estimate(state text, queue text)
+    CREATE OR REPLACE FUNCTION #{state.conf.prefix}.oban_count_estimate(state text, queue text)
     RETURNS integer AS $func$
     DECLARE
       plan jsonb;
     BEGIN
       EXECUTE 'EXPLAIN (FORMAT JSON)
                SELECT id
-               FROM #{conf.prefix}.oban_jobs
-               WHERE state = $1::#{conf.prefix}.oban_job_state
+               FROM #{state.conf.prefix}.oban_jobs
+               WHERE state = $1::#{state.conf.prefix}.oban_job_state
                AND queue = $2'
         INTO plan
         USING state, queue;
@@ -136,7 +137,7 @@ defmodule Oban.Met.Reporter do
     LANGUAGE plpgsql 
     """
 
-    Repo.query!(conf, query, [])
+    Repo.query!(state.conf, query, [])
 
     %{state | function_created?: true}
   end

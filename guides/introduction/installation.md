@@ -44,3 +44,32 @@ declares an override to set the limit to 200k:
 ```elixir
 {Oban.Met, reporter: [estimate_limit: 200_000]}
 ```
+
+## Explicit Migrations
+
+Met will create the necessary estimate function automatically when possible. The migration isn't
+necessary under normal circumstances, but is provided to avoid permission issues or allow full
+control over database changes.
+
+```bash
+mix ecto.gen.migration add_oban_met
+```
+
+Open the generated migration and delegate the `up/0` and `down/0` functions to
+`Oban.Met.Migration`:
+
+```elixir
+defmodule MyApp.Repo.Migrations.AddObanMet do
+  use Ecto.Migration
+
+  def up, do: Oban.Met.Migration.up()
+  def down, do: Oban.Met.Migration.down()
+end
+```
+
+Then, after disabling auto-start, configure the reporter not to auto-migrate if you run the
+explicit migration:
+
+```elixir
+{Oban.Met, reporter: [auto_migrate: false]}
+```

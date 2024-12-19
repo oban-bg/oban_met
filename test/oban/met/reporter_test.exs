@@ -81,7 +81,23 @@ defmodule Oban.Met.ReporterTest do
       Notifier.listen(conf.name, [:metrics])
       send(pid, :checkpoint)
 
-      refute_received {:notification, :metrics, _}
+      refute_receive {:notification, :metrics, _}, 20
+    end
+
+    @tag oban_opts: [peer: Oban.Peers.Isolated, testing: :disabled]
+    test "skipping estimate function creation without auto_migrate", %{conf: conf} do
+      pid = start_supervised!({Reporter, conf: conf, name: @name, auto_migrate: false})
+
+      Notifier.listen(conf.name, [:metrics])
+      send(pid, :checkpoint)
+
+      assert_receive {:notification, :metrics, _}
+
+      assert %{rows: [[false]]} =
+               Repo.query!(
+                 "SELECT EXISTS(SELECT * FROM pg_proc WHERE proname = 'oban_count_estimate')",
+                 []
+               )
     end
   end
 
