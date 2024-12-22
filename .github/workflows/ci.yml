@@ -15,10 +15,11 @@ jobs:
               elixir: '1.14'
               otp: '24.3'
               postgres: '12.13-alpine'
+            exclude_tags: 'lite'
           - pair:
-              elixir: '1.17'
-              otp: '27.0'
-              postgres: '16.2-alpine'
+              elixir: '1.18'
+              otp: '27.2'
+              postgres: '17.2-alpine'
             lint: lint
 
     runs-on: ubuntu-20.04
