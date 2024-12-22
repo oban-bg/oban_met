@@ -49,6 +49,17 @@ defmodule Oban.Met.Reporter do
 
   @spec start_link(Keyword.t()) :: GenServer.on_start()
   def start_link(opts) do
+    conf = Keyword.fetch!(opts, :conf)
+
+    opts =
+      if conf.repo.__adapter__() == Ecto.Adapters.Postgres do
+        opts
+      else
+        opts
+        |> Keyword.put(:auto_migrate, false)
+        |> Keyword.put(:estimate_limit, :infinity)
+      end
+
     state = struct!(State, opts)
 
     GenServer.start_link(__MODULE__, state, name: opts[:name])
@@ -118,16 +129,18 @@ defmodule Oban.Met.Reporter do
   # EXECUTE as we're doing here. A named function helps the performance because it is prepared,
   # and we have to support distributed databases that don't allow DO/END functions.
   defp create_estimate_function(%{auto_migrate: true, function_created?: false} = state) do
+    %{conf: %{prefix: prefix}} = state
+
     query = """
-    CREATE OR REPLACE FUNCTION #{state.conf.prefix}.oban_count_estimate(state text, queue text)
+    CREATE OR REPLACE FUNCTION #{prefix}.oban_count_estimate(state text, queue text)
     RETURNS integer AS $func$
     DECLARE
       plan jsonb;
     BEGIN
       EXECUTE 'EXPLAIN (FORMAT JSON)
                SELECT id
-               FROM #{state.conf.prefix}.oban_jobs
-               WHERE state = $1::#{state.conf.prefix}.oban_job_state
+               FROM #{prefix}.oban_jobs
+               WHERE state = $1::#{prefix}.oban_job_state
                AND queue = $2'
         INTO plan
         USING state, queue;

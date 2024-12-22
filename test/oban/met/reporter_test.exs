@@ -99,6 +99,23 @@ defmodule Oban.Met.ReporterTest do
                  []
                )
     end
+
+    @tag lite: true
+    @tag oban_opts: [engine: Oban.Engines.Lite, repo: Oban.Met.LiteRepo, testing: :disabled]
+    test "reporting estimates for the Lite engine", %{conf: conf} do
+      pid = start_supervised!({Reporter, conf: conf, name: @name, estimate_limit: 0})
+
+      Oban.insert!(conf.name, Job.new(%{}, queue: "alpha", worker: "Worker.A"))
+      Oban.insert!(conf.name, Job.new(%{}, queue: "gamma", worker: "Worker.B"))
+
+      Notifier.listen(conf.name, [:metrics])
+      send(pid, :checkpoint)
+
+      assert_receive {:notification, :metrics, %{"metrics" => metrics}}
+
+      assert "available" in utake(metrics, "state")
+      assert ~w(alpha gamma) = utake(metrics, "queue")
+    end
   end
 
   defp utake(metrics, key) do

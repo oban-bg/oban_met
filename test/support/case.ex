@@ -12,9 +12,11 @@ defmodule Oban.Met.Case do
   end
 
   setup tags do
-    pid = Sandbox.start_owner!(Oban.Met.Repo, shared: not tags[:async])
+    if !tags[:lite] do
+      pid = Sandbox.start_owner!(Oban.Met.Repo, shared: not tags[:async])
 
-    on_exit(fn -> Sandbox.stop_owner(pid) end)
+      on_exit(fn -> Sandbox.stop_owner(pid) end)
+    end
 
     :ok
   end

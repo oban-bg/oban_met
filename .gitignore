@@ -25,5 +25,5 @@ oban_met-*.tar
 # Temporary files, for example, from tests.
 /tmp/
 
-# Temporary release notes
-NOTES.md
+# Ignore local .db files
+/priv/*.db*

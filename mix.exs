@@ -66,8 +66,8 @@ defmodule Oban.Met.MixProject do
         "hex.publish package --yes",
         "lys.publish"
       ],
-      "test.reset": ["ecto.drop -r Oban.Met.Repo", "test.setup"],
-      "test.setup": ["ecto.create -r Oban.Met.Repo --quiet", "ecto.migrate -r Oban.Met.Repo"],
+      "test.reset": ["ecto.drop --quiet", "test.setup"],
+      "test.setup": ["ecto.create --quiet", "ecto.migrate --quiet"],
       "test.ci": [
         "format --check-formatted",
         "deps.unlock --check-unused",
@@ -82,6 +82,7 @@ defmodule Oban.Met.MixProject do
     [
       {:oban, "~> 2.15"},
       {:telemetry, "~> 1.1"},
+      {:ecto_sqlite3, "~> 0.9", only: [:test, :dev]},
       {:postgrex, "~> 0.19", only: [:test, :dev]},
       {:stream_data, "~> 1.1", only: [:test, :dev]},
       {:benchee, "~> 1.3", only: [:test, :dev], runtime: false},
