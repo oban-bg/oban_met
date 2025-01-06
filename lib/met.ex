@@ -1,23 +1,10 @@
 defmodule Oban.Met do
-  @moduledoc """
-  Metric introspection for Oban.
+  @external_resource readme = Path.join([__DIR__, "../README.md"])
 
-  `Oban.Met` supervises a collection of autonomous modules for in-memory, distributed time-series
-  data with zero-configuration. `Oban.Web` relies on `Met` for queue gossip, detailed job counts,
-  and historic metrics.
-
-  ## Highlights
-
-  * Telemetry powered execution tracking for time-series data that is replicated between nodes,
-    filterable by label, arbitrarily mergeable over windows of time, and compacted for longer
-    playback.
-
-  * Centralized counting across queues and states with exponential backoff to minimize load and
-    data replication between nodes.
-
-  * Ephemeral data storage via data replication with handoff between nodes. All nodes have a
-    shared view of the cluster's data and new nodes are caught up when they come online.
-  """
+  @moduledoc readme
+             |> File.read!()
+             |> String.split("<!-- MDOC -->")
+             |> Enum.fetch!(1)
 
   use Supervisor
 
