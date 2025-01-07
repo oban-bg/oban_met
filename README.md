@@ -21,7 +21,7 @@
 <!-- MDOC -->
 
 Met is a distributed, compacting, multidimensional, telemetry-powered time series datastore for
-Oban that requires no configurion. It gathers data for queues, job counts, execution metrics,
+Oban that requires no configuration. It gathers data for queues, job counts, execution metrics,
 active crontabs, historic metrics, and more.
 
 Met powers the charts and runtime details shown in the [Oban Web][web] dashboard.
