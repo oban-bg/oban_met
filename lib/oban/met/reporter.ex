@@ -13,6 +13,7 @@ defmodule Oban.Met.Reporter do
 
   alias __MODULE__, as: State
   alias Oban.{Job, Notifier, Peer, Repo}
+  alias Oban.Met.Migration
   alias Oban.Met.Values.Gauge
   alias Oban.Pro.Engines.Smart
 
@@ -125,30 +126,10 @@ defmodule Oban.Met.Reporter do
 
   # Checking
 
-  # An `EXPLAIN` can only be executed as the top level of a query, or through an SQL function's
-  # EXECUTE as we're doing here. A named function helps the performance because it is prepared,
-  # and we have to support distributed databases that don't allow DO/END functions.
   defp create_estimate_function(%{auto_migrate: true, function_created?: false} = state) do
     %{conf: %{prefix: prefix}} = state
 
-    query = """
-    CREATE OR REPLACE FUNCTION #{prefix}.oban_count_estimate(state text, queue text)
-    RETURNS integer AS $func$
-    DECLARE
-      plan jsonb;
-    BEGIN
-      EXECUTE 'EXPLAIN (FORMAT JSON)
-               SELECT id
-               FROM #{prefix}.oban_jobs
-               WHERE state = $1::#{prefix}.oban_job_state
-               AND queue = $2'
-        INTO plan
-        USING state, queue;
-      RETURN plan->0->'Plan'->'Plan Rows';
-    END;
-    $func$
-    LANGUAGE plpgsql 
-    """
+    query = Migration.oban_count_estimate(prefix)
 
     Repo.query!(state.conf, query, [])
 

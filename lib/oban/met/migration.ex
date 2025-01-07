@@ -51,26 +51,10 @@ defmodule Oban.Met.Migration do
       Oban.Met.Migration.up(prefix: "payments")
   """
   def up(opts \\ []) when is_list(opts) do
-    prefix = Keyword.get(opts, :prefix, "public")
-
-    execute """
-    CREATE OR REPLACE FUNCTION #{prefix}.oban_count_estimate(state text, queue text)
-    RETURNS integer AS $func$
-    DECLARE
-      plan jsonb;
-    BEGIN
-      EXECUTE 'EXPLAIN (FORMAT JSON)
-               SELECT id
-               FROM #{prefix}.oban_jobs
-               WHERE state = $1::#{prefix}.oban_job_state
-               AND queue = $2'
-        INTO plan
-        USING state, queue;
-      RETURN plan->0->'Plan'->'Plan Rows';
-    END;
-    $func$
-    LANGUAGE plpgsql 
-    """
+    opts
+    |> Keyword.get(:prefix, "public")
+    |> oban_count_estimate()
+    |> execute()
   end
 
   @doc """
@@ -90,5 +74,30 @@ defmodule Oban.Met.Migration do
     prefix = Keyword.get(opts, :prefix, "public")
 
     execute "DROP FUNCTION IF EXISTS #{prefix}.oban_count_estimate(text, text)"
+  end
+
+  # An `EXPLAIN` can only be executed as the top level of a query, or through an SQL function's
+  # EXECUTE as we're doing here. A named function helps the performance because it is prepared,
+  # and we have to support distributed databases that don't allow DO/END functions.
+  @doc false
+  def oban_count_estimate(prefix) do
+    """
+    CREATE OR REPLACE FUNCTION #{prefix}.oban_count_estimate(state text, queue text)
+    RETURNS integer AS $func$
+    DECLARE
+      plan jsonb;
+    BEGIN
+      EXECUTE 'EXPLAIN (FORMAT JSON)
+               SELECT id
+               FROM #{prefix}.oban_jobs
+               WHERE state = $1::#{prefix}.oban_job_state
+               AND queue = $2'
+        INTO plan
+        USING state, queue;
+      RETURN plan->0->'Plan'->'Plan Rows';
+    END;
+    $func$
+    LANGUAGE plpgsql 
+    """
   end
 end
