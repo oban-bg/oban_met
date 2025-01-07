@@ -358,6 +358,9 @@ defmodule Oban.Met.RecorderTest do
 
       assert_receive {:notification, :handoff, %{"syn" => true}}
 
+      # Not ideal, but this test flickers in older versions of OTP
+      Process.sleep(50)
+
       # Fake a response from another node
       Notifier.notify(conf, :handoff, %{syn: true, module: Recorder})
 
