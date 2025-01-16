@@ -13,8 +13,9 @@ defmodule Oban.Met.Values.Sketch do
           size: non_neg_integer()
         }
 
-  @derive Jason.Encoder
-  @derive JSON.Encoder
+  @encoder if Code.ensure_loaded?(JSON.Encoder), do: JSON.Encoder, else: Jason.Encoder
+
+  @derive @encoder
   defstruct data: %{}, size: 0
 
   @error 0.02
@@ -169,8 +170,8 @@ defmodule Oban.Met.Values.Sketch do
   ## Examples
 
       iex> Sketch.new([1, 2])
-      ...> |> Jason.encode!()
-      ...> |> Jason.decode!()
+      ...> |> Oban.JSON.encode!()
+      ...> |> Oban.JSON.decode!()
       ...> |> Sketch.from_map()
       ...> |> Sketch.quantile(1.0)
       ...> |> floor()

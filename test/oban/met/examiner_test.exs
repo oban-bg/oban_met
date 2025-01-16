@@ -110,8 +110,8 @@ defmodule Oban.Met.ExaminerTest do
 
       payload =
         %{checks: checks}
-        |> Jason.encode!()
-        |> Jason.decode!()
+        |> Oban.JSON.encode!()
+        |> Oban.JSON.decode!()
 
       send(pid, {:notification, :gossip, payload})
 

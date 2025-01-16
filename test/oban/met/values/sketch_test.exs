@@ -27,8 +27,8 @@ defmodule Oban.Met.Values.SketchTest do
 
       sketch =
         sketch
-        |> Jason.encode!()
-        |> Jason.decode!()
+        |> Oban.JSON.encode!()
+        |> Oban.JSON.decode!()
         |> Sketch.from_map()
 
       assert size == Sketch.size(sketch)
