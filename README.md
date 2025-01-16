@@ -1,20 +1,20 @@
 # Oban Met
 
 <p align="center">
-  <a href="https://hex.pm/packages/oban_web">
-    <img alt="Hex Version" src="https://img.shields.io/hexpm/v/oban_web.svg" />
+  <a href="https://hex.pm/packages/oban_met">
+    <img alt="Hex Version" src="https://img.shields.io/hexpm/v/oban_met.svg" />
   </a>
 
-  <a href="https://hexdocs.pm/oban_web">
+  <a href="https://hexdocs.pm/oban_met">
     <img alt="Hex Docs" src="http://img.shields.io/badge/hex.pm-docs-green.svg?style=flat" />
   </a>
 
-  <a href="https://github.com/oban-bg/oban_web/actions">
-    <img alt="CI Status" src="https://github.com/oban-bg/oban_web/workflows/ci/badge.svg" />
+  <a href="https://github.com/oban-bg/oban_met/actions">
+    <img alt="CI Status" src="https://github.com/oban-bg/oban_met/workflows/ci/badge.svg" />
   </a>
 
   <a href="https://opensource.org/licenses/Apache-2.0">
-    <img alt="Apache 2 License" src="https://img.shields.io/hexpm/l/oban_web" />
+    <img alt="Apache 2 License" src="https://img.shields.io/hexpm/l/oban_met" />
   </a>
 </p>
 
