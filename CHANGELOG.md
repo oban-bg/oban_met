@@ -1,5 +1,13 @@
 # Changelog for Oban Met v1.0
 
+## v1.0.1 — 2025-01-16
+
+### Bug Fixes
+
+- [Value] Implement `JSON.Encoder` for value types
+
+  The encoder is necessary to work with official JSON encoded values as well as legacy Jason.
+
 ## v1.0.0 — 2025-01-16
 
 This is the official v1.0 release _and_ the package is now open source!
