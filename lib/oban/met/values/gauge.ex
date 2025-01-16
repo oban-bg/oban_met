@@ -6,6 +6,7 @@ defmodule Oban.Met.Values.Gauge do
   alias __MODULE__, as: Gauge
 
   @derive Jason.Encoder
+  @derive JSON.Encoder
   defstruct data: 0
 
   @type t :: %__MODULE__{data: [non_neg_integer()]}

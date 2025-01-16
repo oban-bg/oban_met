@@ -14,6 +14,7 @@ defmodule Oban.Met.Values.Sketch do
         }
 
   @derive Jason.Encoder
+  @derive JSON.Encoder
   defstruct data: %{}, size: 0
 
   @error 0.02
