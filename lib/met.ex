@@ -296,20 +296,30 @@ defmodule Oban.Met do
     conf = Keyword.fetch!(opts, :conf)
 
     children = [
-      {Cronitor, with_opts(:cronitor, conf: conf, name: Registry.via(conf.name, Cronitor))},
-      {Examiner, with_opts(:examiner, conf: conf, name: Registry.via(conf.name, Examiner))},
-      {Recorder, with_opts(:recorder, conf: conf, name: Registry.via(conf.name, Recorder))},
-      {Listener, with_opts(:listener, conf: conf, name: Registry.via(conf.name, Listener))},
-      {Reporter, with_opts(:reporter, conf: conf, name: Registry.via(conf.name, Reporter))},
+      {Cronitor, with_opts(:cronitor, conf, opts)},
+      {Examiner, with_opts(:examiner, conf, opts)},
+      {Recorder, with_opts(:recorder, conf, opts)},
+      {Listener, with_opts(:listener, conf, opts)},
+      {Reporter, with_opts(:reporter, conf, opts)},
       {Task, fn -> :telemetry.execute([:oban, :met, :init], %{}, %{pid: self(), conf: conf}) end}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
   end
 
-  defp with_opts(name, opts) do
+  defp with_opts(name, conf, opts) do
+    real_name =
+      name
+      |> to_string()
+      |> String.capitalize()
+      |> then(&Module.safe_concat([Oban, Met, &1]))
+
+    init_opts = Keyword.get(opts, name, [])
+
     :oban_met
     |> Application.get_env(name, [])
-    |> Keyword.merge(opts)
+    |> Keyword.merge(init_opts)
+    |> Keyword.put(:conf, conf)
+    |> Keyword.put(:name, Registry.via(conf.name, real_name))
   end
 end
