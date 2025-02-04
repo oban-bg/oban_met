@@ -112,6 +112,10 @@ defmodule Oban.Met.Cronitor do
     {:noreply, %State{state | crontabs: crontabs}}
   end
 
+  def handle_info({:EXIT, _pid, :shutdown}, state) do
+    {:stop, :shutdown, state}
+  end
+
   # Helpers
 
   defp purge_stale(state) do
