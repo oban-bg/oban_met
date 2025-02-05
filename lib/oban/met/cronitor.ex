@@ -6,6 +6,8 @@ defmodule Oban.Met.Cronitor do
   alias __MODULE__, as: State
   alias Oban.Notifier
 
+  require Logger
+
   defstruct [
     :conf,
     :name,
@@ -110,6 +112,16 @@ defmodule Oban.Met.Cronitor do
     crontabs = Map.put(state.crontabs, {node, name}, {ts, crontab})
 
     {:noreply, %State{state | crontabs: crontabs}}
+  end
+
+  def handle_info(message, state) do
+    Logger.warning(
+      message: "Received unexpected message: #{inspect(message)}",
+      source: :oban_met,
+      module: __MODULE__
+    )
+
+    {:noreply, state}
   end
 
   # Helpers

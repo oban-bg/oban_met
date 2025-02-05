@@ -17,6 +17,8 @@ defmodule Oban.Met.Reporter do
   alias Oban.Met.Values.Gauge
   alias Oban.Pro.Engines.Smart
 
+  require Logger
+
   @empty_states %{
     "available" => [],
     "cancelled" => [],
@@ -114,6 +116,16 @@ defmodule Oban.Met.Reporter do
     else
       {:noreply, schedule_checks(state)}
     end
+  end
+
+  def handle_info(message, state) do
+    Logger.warning(
+      message: "Received unexpected message: #{inspect(message)}",
+      source: :oban_met,
+      module: __MODULE__
+    )
+
+    {:noreply, state}
   end
 
   # Scheduling
