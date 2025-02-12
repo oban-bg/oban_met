@@ -22,7 +22,7 @@ jobs:
               postgres: '17.2-alpine'
             lint: lint
 
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
