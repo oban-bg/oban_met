@@ -64,6 +64,7 @@ defmodule Oban.Met.MixProject do
     [
       main: "Oban.Met",
       source_ref: "v#{@version}",
+      source_url: @source_url,
       formatters: ["html"],
       api_reference: false,
       extra_section: "GUIDES",
