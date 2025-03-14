@@ -1,5 +1,23 @@
 # Changelog for Oban Met v1.0
 
+## v1.0.2 — 2025-03-14
+
+This release requires Oban v2.19 because of a dependency on the new JSON module.
+
+### Bug Fixes
+
+- [Met] Log unexpected messages from trapping servers
+
+  The `reporter` and `cronitor` have a small set of messages they expect. Rather than crashing on
+  unexpected messages, the processes now log a warning instead.
+
+- [Meta] Override application options with passed options
+
+  Passed options weren't relayed to the underlying module and only application level options had
+  any effect. This ensures options from both locations are merged.
+
+- [Met] Use conditional JSON derive and Oban.JSON wrapper
+
 ## v1.0.1 — 2025-01-16
 
 ### Bug Fixes
