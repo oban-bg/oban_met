@@ -92,7 +92,7 @@ defmodule Oban.Met.MixProject do
 
   defp deps do
     [
-      {:oban, "~> 2.18"},
+      {:oban, "~> 2.19"},
       {:ecto_sqlite3, "~> 0.18", only: [:test, :dev]},
       {:postgrex, "~> 0.19", only: [:test, :dev]},
       {:stream_data, "~> 1.1", only: [:test, :dev]},
