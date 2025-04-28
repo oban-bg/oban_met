@@ -106,9 +106,11 @@ defmodule Oban.Met.Examiner do
     checks =
       Oban.Registry
       |> Registry.select(match)
-      |> Enum.map(&safe_check(&1, state))
-      |> Enum.filter(&is_map/1)
-      |> Enum.map(&sanitize_name/1)
+      |> Task.async_stream(&safe_check(&1, state), on_timeout: :kill_task, ordered: false)
+      |> Enum.reduce([], fn
+        {:ok, check}, acc when is_map(check) -> [check | acc]
+        _, acc -> acc
+      end)
 
     if Enum.any?(checks), do: Notifier.notify(state.conf, :gossip, %{checks: checks})
 
@@ -156,7 +158,11 @@ defmodule Oban.Met.Examiner do
   # Checking
 
   defp safe_check(pid, state) do
-    if Process.alive?(pid), do: GenServer.call(pid, :check, state.interval)
+    if Process.alive?(pid) do
+      pid
+      |> GenServer.call(:check, state.interval)
+      |> sanitize_name()
+    end
   catch
     :exit, _ -> :error
   end
