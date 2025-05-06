@@ -1,5 +1,12 @@
 # Changelog for Oban Met v1.0
 
+## v1.0.3 — 2025-05-06
+
+- [Examiner] Use parallel execution for health checks.
+
+  Minimize total time taken to scrape checks from producers by parallelizing calls. The worst case
+  time is now O(1) rather than O(n) when producers are busy.
+
 ## v1.0.2 — 2025-03-14
 
 This release requires Oban v2.19 because of a dependency on the new JSON module.
