@@ -89,33 +89,37 @@ defmodule Oban.Met.Reporter do
 
   @impl GenServer
   def handle_info(:checkpoint, %State{conf: conf} = state) do
-    if Peer.leader?(conf.name) do
-      state =
-        state
-        |> create_estimate_function()
-        |> cache_queues()
+    leader = Peer.leader?(conf.name)
+    meta = %{conf: state.conf, plugin: __MODULE__, peer_leader: leader}
 
-      {:ok, checks} = checks(state)
+    :telemetry.span([:oban, :plugin], meta, fn ->
+      if leader do
+        state =
+          state
+          |> create_estimate_function()
+          |> cache_queues()
 
-      metrics =
-        for {_key, counts} <- checks,
-            count <- counts,
-            do: Map.update!(count, :value, &Gauge.new/1)
+        {:ok, checks} = checks(state)
 
-      payload = %{
-        metrics: metrics,
-        name: inspect(conf.name),
-        node: conf.node,
-        time: System.system_time(:second)
-      }
+        metrics =
+          for {_key, counts} <- checks,
+              count <- counts,
+              do: Map.update!(count, :value, &Gauge.new/1)
 
-      Notifier.notify(conf, :metrics, payload)
+        payload = %{
+          metrics: metrics,
+          name: inspect(conf.name),
+          node: conf.node,
+          time: System.system_time(:second)
+        }
 
-      {:noreply,
-       schedule_checks(%{state | check_counter: state.check_counter + 1, checks: checks})}
-    else
-      {:noreply, schedule_checks(state)}
-    end
+        Notifier.notify(conf, :metrics, payload)
+
+        {{:noreply, schedule_checks(%{state | check_counter: state.check_counter + 1, checks: checks})}, metrics, meta}
+      else
+        {{:noreply, schedule_checks(state)}, meta}
+      end
+    end)
   end
 
   def handle_info(message, state) do
