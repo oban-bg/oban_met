@@ -71,7 +71,7 @@ defmodule Oban.Met.Reporter do
   # Callbacks
 
   @impl GenServer
-  def init(state) do
+  def init(%State{} = state) do
     Process.flag(:trap_exit, true)
 
     # Used to ensure testing helpers to auto-allow this module for sandbox access.
@@ -133,7 +133,7 @@ defmodule Oban.Met.Reporter do
   defp schedule_checks(state) do
     timer = Process.send_after(self(), :checkpoint, state.check_interval)
 
-    %State{state | check_timer: timer}
+    %{state | check_timer: timer}
   end
 
   # Checking

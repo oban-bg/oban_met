@@ -151,8 +151,8 @@ defmodule Oban.Met.Examiner do
 
   # Scheduling
 
-  defp schedule_check(state) do
-    %State{state | timer: Process.send_after(self(), :check, state.interval)}
+  defp schedule_check(%State{} = state) do
+    %{state | timer: Process.send_after(self(), :check, state.interval)}
   end
 
   # Checking

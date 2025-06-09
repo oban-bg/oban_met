@@ -364,7 +364,7 @@ defmodule Oban.Met.Recorder do
 
     timer = Process.send_after(self(), :compact, interval)
 
-    %State{state | compact_timer: timer}
+    %{state | compact_timer: timer}
   end
 
   # Fetching & Filtering
