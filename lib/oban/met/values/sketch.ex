@@ -63,7 +63,7 @@ defmodule Oban.Met.Values.Sketch do
     bin = ceil(:math.log(value) * @inv_log_gamma)
     data = Map.update(sketch.data, bin, 1, &(&1 + 1))
 
-    %Sketch{sketch | data: data, size: sketch.size + 1}
+    %{sketch | data: data, size: sketch.size + 1}
   end
 
   @doc """
@@ -82,7 +82,7 @@ defmodule Oban.Met.Values.Sketch do
   def merge(%Sketch{} = sketch_1, %Sketch{} = sketch_2) do
     data = Map.merge(sketch_1.data, sketch_2.data, fn _, val_1, val_2 -> val_1 + val_2 end)
 
-    %Sketch{sketch_1 | data: data, size: sketch_1.size + sketch_2.size}
+    %{sketch_1 | data: data, size: sketch_1.size + sketch_2.size}
   end
 
   @doc """

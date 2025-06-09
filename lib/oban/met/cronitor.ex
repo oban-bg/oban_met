@@ -111,7 +111,7 @@ defmodule Oban.Met.Cronitor do
 
     crontabs = Map.put(state.crontabs, {node, name}, {ts, crontab})
 
-    {:noreply, %State{state | crontabs: crontabs}}
+    {:noreply, %{state | crontabs: crontabs}}
   end
 
   def handle_info(message, state) do
@@ -126,14 +126,14 @@ defmodule Oban.Met.Cronitor do
 
   # Helpers
 
-  defp purge_stale(state) do
+  defp purge_stale(%State{} = state) do
     expires = System.system_time(:millisecond) - state.ttl
     crontabs = Map.reject(state.crontabs, fn {_key, {ts, _tab}} -> ts < expires end)
 
-    %State{state | crontabs: crontabs}
+    %{state | crontabs: crontabs}
   end
 
-  defp schedule_share(state) do
-    %State{state | timer: Process.send_after(self(), :share, state.interval)}
+  defp schedule_share(%State{} = state) do
+    %{state | timer: Process.send_after(self(), :share, state.interval)}
   end
 end
