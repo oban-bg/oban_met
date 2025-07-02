@@ -3,6 +3,10 @@ defmodule Oban.Met.ApplicationTest do
 
   @opts [notifier: Oban.Notifiers.Isolated, repo: Oban.Met.Repo]
 
+  defmodule MyOban do
+    use Oban, otp_app: :oban_met
+  end
+
   describe "initializing storage with :auto_mode enabled" do
     setup do
       Application.put_env(:oban_met, :auto_start, true)
@@ -30,6 +34,16 @@ defmodule Oban.Met.ApplicationTest do
       Application.stop(:oban_met)
 
       start_supervised!({Oban, @opts})
+
+      Application.start(:oban_met)
+
+      with_backoff(fn -> assert 1 == count_supervised() end)
+    end
+
+    test "starting supervision for named instances" do
+      Application.stop(:oban_met)
+
+      start_supervised!({MyOban, @opts})
 
       Application.start(:oban_met)
 

@@ -3,6 +3,8 @@ defmodule Oban.Met.Application do
 
   use Application
 
+  alias Oban.{Config, Registry}
+
   require Logger
 
   @main_sup Oban.Met.Supervisor
@@ -35,8 +37,10 @@ defmodule Oban.Met.Application do
 
   @doc false
   def boot_metrics do
-    Oban.Registry
-    |> Registry.select([{{Oban, :_, :"$1"}, [], [:"$1"]}])
+    guard = {:andalso, {:is_map, :"$1"}, {:==, {:map_get, :__struct__, :"$1"}, Config}}
+
+    [{{:_, :_, :"$1"}, [guard], [:"$1"]}]
+    |> Registry.select()
     |> Enum.each(&start_metrics/1)
   end
 
