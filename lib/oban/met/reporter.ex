@@ -208,7 +208,7 @@ defmodule Oban.Met.Reporter do
         series: :full_count,
         state: x.value,
         queue: p.value,
-        value: fragment("?.oban_count_estimate(?, ?)", literal(^conf.prefix), x.value, p.value)
+        value: fragment("?.oban_count_estimate(?, ?)", identifier(^conf.prefix), x.value, p.value)
       }
     )
   end
