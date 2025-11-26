@@ -1,6 +1,20 @@
 # Changelog for Oban Met v1.0
 
+## v1.0.4 — 2025-11-26
+
+### Bug Fixes
+
+- [Met] Match on config to auto-start named instances
+
+  The registry pattern only matched `Oban` instances, not modules created with `use Oban`. This
+  modifies the pattern to extract `Oban.Config` structs directly.
+
+- [Met] Remove use of struct update syntax deprecated in Elixir v1.19
+
+
 ## v1.0.3 — 2025-05-06
+
+### Enhancements
 
 - [Examiner] Use parallel execution for health checks.
 
