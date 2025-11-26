@@ -1,8 +1,8 @@
 defmodule Oban.Met.ReporterTest do
   use Oban.Met.Case
 
-  alias Oban.Met.{Repo, Reporter}
   alias Oban.{Job, Notifier}
+  alias Oban.Met.{Repo, Reporter}
 
   @name Oban.Reporter
 
