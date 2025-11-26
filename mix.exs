@@ -15,12 +15,6 @@ defmodule Oban.Met.MixProject do
       docs: docs(),
       aliases: aliases(),
       package: package(),
-      preferred_cli_env: [
-        "ecto.gen.migration": :test,
-        "test.ci": :test,
-        "test.reset": :test,
-        "test.setup": :test
-      ],
 
       # Description
       name: "Oban Met",
@@ -41,6 +35,17 @@ defmodule Oban.Met.MixProject do
       extra_applications: [:logger],
       mod: {Oban.Met.Application, []},
       env: [auto_start: true, auto_testing_modes: [:disabled]]
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
+        "ecto.gen.migration": :test,
+        "test.ci": :test,
+        "test.reset": :test,
+        "test.setup": :test
+      ]
     ]
   end
 
@@ -94,7 +99,7 @@ defmodule Oban.Met.MixProject do
     [
       {:oban, "~> 2.19"},
       {:ecto_sqlite3, "~> 0.18", only: [:test, :dev]},
-      {:postgrex, "~> 0.19", only: [:test, :dev]},
+      {:postgrex, "~> 0.20", only: [:test, :dev]},
       {:stream_data, "~> 1.1", only: [:test, :dev]},
       {:benchee, "~> 1.3", only: [:test, :dev], runtime: false},
       {:credo, "~> 1.7", only: [:test, :dev], runtime: false},
