@@ -96,7 +96,7 @@ plugins: [
 Options for internal `Oban.Met` processes can be overridden from the plugin specification. Most
 options are internal and not meant to be overridden, but one particularly useful option to tune is
 the `estimate_limit`. The `estimate_limit` determines at which point state/queue counts switch
-from using an accurate `count(*)` call to a much more efficient, but less accurate, estiamte
+from using an accurate `count(*)` call to a much more efficient, but less accurate, estimate
 function.
 
 The default limit is a conservative 50k, which may be too low for systems with insert spikes. This
