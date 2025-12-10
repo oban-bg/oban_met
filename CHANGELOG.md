@@ -1,5 +1,15 @@
 # Changelog for Oban Met v1.0
 
+## v1.0.5 — 2025-12-10
+
+### Bug Fixes
+
+- [Examiner] Normalize `limit` to `local_limit` for web consistency
+
+  Oban checks return `limit`, while Pro stores them as `local_limit`. That causes inconsistent
+  data when displaying OSS queue details in `oban_web`. This stores `limit` as `local_limit`
+  consistently, rather than checking for both keys.
+
 ## v1.0.4 — 2025-11-26
 
 ### Bug Fixes
