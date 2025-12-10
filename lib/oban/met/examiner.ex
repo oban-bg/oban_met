@@ -49,6 +49,7 @@ defmodule Oban.Met.Examiner do
   def store(name_or_table, check, opts \\ []) when is_map(check) do
     %{"node" => node, "name" => name, "queue" => queue} = check
 
+    check = normalize_limit(check)
     timestamp = Keyword.get(opts, :timestamp, System.system_time(:millisecond))
 
     name_or_table
@@ -169,4 +170,11 @@ defmodule Oban.Met.Examiner do
 
   defp sanitize_name(%{name: name} = check) when is_binary(name), do: check
   defp sanitize_name(%{name: name} = check), do: %{check | name: inspect(name)}
+
+  defp normalize_limit(check) do
+    case Map.pop(check, "limit") do
+      {nil, check} -> check
+      {lim, check} -> Map.put(check, "local_limit", lim)
+    end
+  end
 end

@@ -44,8 +44,8 @@ defmodule Oban.Met.ExaminerTest do
 
       checks = Examiner.all_checks(@name)
 
-      assert_in(checks, %{"node" => "web.1", "limit" => 4, "queue" => "alpha"})
-      assert_in(checks, %{"node" => "web.2", "limit" => 4, "queue" => "alpha"})
+      assert_in(checks, %{"node" => "web.1", "local_limit" => 4, "queue" => "alpha"})
+      assert_in(checks, %{"node" => "web.2", "local_limit" => 4, "queue" => "alpha"})
     end
   end
 
@@ -55,14 +55,14 @@ defmodule Oban.Met.ExaminerTest do
     test "older checks are automatically purged" do
       ts = System.system_time(:millisecond)
 
-      store(%{name: Oban, node: "web.1", queue: "alpha", limit: 5}, timestamp: ts - 1900)
-      store(%{name: Oban, node: "web.1", queue: "delta", limit: 5}, timestamp: ts - 2100)
+      store(%{name: Oban, node: "web.1", queue: "alpha", local_limit: 5}, timestamp: ts - 1900)
+      store(%{name: Oban, node: "web.1", queue: "delta", local_limit: 5}, timestamp: ts - 2100)
 
       Examiner.purge(@name, :timer.seconds(2))
 
       assert [check] = Examiner.all_checks(@name)
 
-      assert %{"node" => "web.1", "limit" => 5, "queue" => "alpha"} = check
+      assert %{"node" => "web.1", "local_limit" => 5, "queue" => "alpha"} = check
     end
   end
 
