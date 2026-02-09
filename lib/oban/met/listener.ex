@@ -9,6 +9,8 @@ defmodule Oban.Met.Listener do
   alias Oban.Met.Values.{Gauge, Sketch}
   alias Oban.Notifier
 
+  @time_unit Application.compile_env(:oban_met, :sketch_time_unit, :native)
+
   defstruct [
     :conf,
     :name,
@@ -116,9 +118,10 @@ defmodule Oban.Met.Listener do
     trst = trans_state(state)
 
     # Sketches don't support negative times (caused when the VM wakes from sleep), or zero values
-    # (infrequently caused by the same situation).
-    exec_time = exec_time |> abs() |> max(1)
-    wait_time = wait_time |> abs() |> max(1)
+    # (infrequently caused by the same situation). Times are converted to the configured unit
+    # before clamping.
+    exec_time = exec_time |> convert_time() |> abs() |> max(1)
+    wait_time = wait_time |> convert_time() |> abs() |> max(1)
 
     :ets.insert(tab, [
       {{:exec_time, trst, queue, worker}, time, exec_time},
@@ -128,6 +131,12 @@ defmodule Oban.Met.Listener do
   end
 
   def handle_event(_event, _measure, _meta, _conf), do: :ok
+
+  if @time_unit == :native do
+    defp convert_time(value), do: value
+  else
+    defp convert_time(value), do: System.convert_time_unit(value, :native, @time_unit)
+  end
 
   # Scheduling
 

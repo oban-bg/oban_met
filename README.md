@@ -135,6 +135,29 @@ explicit migration:
 {Oban.Met, reporter: [auto_migrate: false]}
 ```
 
+### Sketch Time Unit
+
+Timing metrics (execution time, queue time) are stored in space-efficient quantile sketches. By
+default, values are recorded in `:native` time units (nanoseconds on most systems), which provides
+maximum precision but uses more space.
+
+For reduced storage size (~20% smaller) and better bin consolidation, you can configure sketches to
+store timing in milliseconds:
+
+```elixir
+config :oban_met, sketch_time_unit: :millisecond
+```
+
+This is a compile-time option that affects how timing values are binned in sketches.
+
+> #### Cluster Consistency {: .warning}
+>
+> All nodes in a cluster **must** use the same `sketch_time_unit` setting. Mixing units between
+> nodes will produce incorrect aggregated metrics.
+>
+> After changing this setting, existing metrics will be invalid until compaction ages them out
+> (approximately 2 hours with default compaction periods).
+
 <!-- MDOC -->
 
 ## Contributing
