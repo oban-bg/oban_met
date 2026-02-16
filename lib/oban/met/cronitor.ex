@@ -83,8 +83,8 @@ defmodule Oban.Met.Cronitor do
       |> Keyword.get(Oban.Plugins.Cron, [])
       |> Keyword.get(:crontab, [])
       |> Enum.map(fn
-        {expr, work} -> {expr, inspect(work), []}
-        {expr, work, opts} -> {expr, inspect(work), opts}
+        {expr, work} -> {expr, inspect(work), %{}}
+        {expr, work, opts} -> {expr, inspect(work), Map.new(opts)}
       end)
 
     payload = %{crontab: crontab, name: inspect(name), node: node}
@@ -103,12 +103,7 @@ defmodule Oban.Met.Cronitor do
     %{"crontab" => crontab, "name" => name, "node" => node} = payload
 
     ts = System.system_time(:millisecond)
-
-    crontab =
-      Enum.map(crontab, fn [expr, work, opts] ->
-        {expr, work, Map.new(opts, &List.to_tuple/1)}
-      end)
-
+    crontab = Enum.map(crontab, &List.to_tuple/1)
     crontabs = Map.put(state.crontabs, {node, name}, {ts, crontab})
 
     {:noreply, %{state | crontabs: crontabs}}

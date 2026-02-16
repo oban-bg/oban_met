@@ -38,11 +38,11 @@ defmodule Oban.Met.CronitorTest do
       assert %{"crontab" => crontab, "name" => _, "node" => "worker.1"} = payload
 
       assert [
-               ["0 * * * *", "MyApp.WorkerA", []],
-               ["1 * * * *", "MyApp.WorkerB", []],
-               ["2 * * * *", "MyApp.WorkerC", [["args", %{"mode" => "foo"}]]],
-               ["3 * * * *", "MyApp.WorkerC", [["args", %{"mode" => "bar"}]]],
-               ["4 * * * *", "MyApp.WorkerD", [["priority", 3]]]
+               ["0 * * * *", "MyApp.WorkerA", %{}],
+               ["1 * * * *", "MyApp.WorkerB", %{}],
+               ["2 * * * *", "MyApp.WorkerC", %{"args" => %{"mode" => "foo"}}],
+               ["3 * * * *", "MyApp.WorkerC", %{"args" => %{"mode" => "bar"}}],
+               ["4 * * * *", "MyApp.WorkerD", %{"priority" => 3}]
              ] == crontab
     end
   end
@@ -51,10 +51,10 @@ defmodule Oban.Met.CronitorTest do
     setup [:start_supervised_oban, :start_supervised_cronitor]
 
     test "fetching all stored crontabs", %{conf: conf} do
-      opts = [["args", %{"mode" => "foo"}]]
+      opts = %{"args" => %{"mode" => "foo"}}
 
-      share(conf, name: Oban, node: "web.1", crontab: [{"* * * * *", "Worker.A", []}])
-      share(conf, name: Oban, node: "web.2", crontab: [{"* * * * *", "Worker.B", []}])
+      share(conf, name: Oban, node: "web.1", crontab: [{"* * * * *", "Worker.A", %{}}])
+      share(conf, name: Oban, node: "web.2", crontab: [{"* * * * *", "Worker.B", %{}}])
       share(conf, name: Oban, node: "web.3", crontab: [])
       share(conf, name: Oban, node: "web.1", crontab: [{"0 * * * *", "Worker.A", opts}])
 
