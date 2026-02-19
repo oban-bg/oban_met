@@ -1,5 +1,24 @@
 # Changelog for Oban Met v1.0
 
+## v1.0.6 — 2026-02-19
+
+### Enhancements
+
+- Add configurable time unit for timing metrics
+
+  Metrics stored in sketches now support configurable time units via the `:sketch_time_unit`
+  compile-time option. By default, timing values remain in `:native` units for backward
+  compatibility.
+
+  Setting `config :oban_met, sketch_time_unit: :millisecond` reduces sketch storage size by ~20%
+  and consolidates timing values into fewer bins by eliminating nanosecond-level measurement
+  noise.
+
+- Share crontab options as a map rather than nested lists
+
+  For compatibility with entries shared by python, we convert options to a
+  map structure rather than a list of lists.
+
 ## v1.0.5 — 2025-12-10
 
 ### Bug Fixes
