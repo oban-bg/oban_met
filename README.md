@@ -106,6 +106,16 @@ declares an override to set the limit to 200k:
 {Oban.Met, reporter: [estimate_limit: 200_000]}
 ```
 
+### Customizing Check Interval
+
+The reporter periodically counts jobs in each state/queue combination to provide the counts
+displayed in Oban Web. By default, counts are checked every 1 second. For systems where real-time
+counts aren't critical, or to reduce database load, you can increase the interval:
+
+```elixir
+{Oban.Met, reporter: [check_interval: :timer.seconds(5)]}
+```
+
 ### Explicit Migrations
 
 Met will create the necessary estimate function automatically when possible. The migration isn't
