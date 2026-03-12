@@ -148,7 +148,6 @@ defmodule Oban.Met.Listener do
 
   # For backward compatibility reasons, the telemetry event's state doesn't match the final job
   # state. Here we translate the event state to the `t:Oban.Job.state`.
-  defp trans_state(:cancelled), do: :cancelled
   defp trans_state(:discard), do: :discarded
   defp trans_state(:exhausted), do: :discarded
   defp trans_state(:failure), do: :retryable
