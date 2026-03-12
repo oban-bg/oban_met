@@ -26,7 +26,8 @@ defmodule Oban.Met.Reporter do
     "discarded" => [],
     "executing" => [],
     "retryable" => [],
-    "scheduled" => []
+    "scheduled" => [],
+    "suspended" => []
   }
 
   defstruct [
