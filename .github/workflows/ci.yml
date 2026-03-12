@@ -14,12 +14,12 @@ jobs:
           - pair:
               elixir: '1.15'
               otp: '24.3'
-              postgres: '12.13-alpine'
+              postgres: '14.22-alpine'
             exclude_tags: 'lite'
           - pair:
               elixir: '1.19'
               otp: '28.1'
-              postgres: '18.0-alpine'
+              postgres: '18.3-alpine'
             lint: lint
 
     runs-on: ubuntu-24.04
