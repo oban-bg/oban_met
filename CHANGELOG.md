@@ -1,10 +1,19 @@
 # Changelog for Oban Met v1.0
 
+## v1.1.0 — 2026-03-25
+
+### Enhancements
+
+- [Met] Require a minimum of Oban v2.21
+
+  Oban v2.21 introduces the `suspended` state, which is now counted by the reporter along with the
+  other states.
+
 ## v1.0.6 — 2026-02-19
 
 ### Enhancements
 
-- Add configurable time unit for timing metrics
+- [Met] Add configurable time unit for timing metrics
 
   Metrics stored in sketches now support configurable time units via the `:sketch_time_unit`
   compile-time option. By default, timing values remain in `:native` units for backward
@@ -14,7 +23,7 @@
   and consolidates timing values into fewer bins by eliminating nanosecond-level measurement
   noise.
 
-- Share crontab options as a map rather than nested lists
+- [Cronitor] Share crontab options as a map rather than nested lists
 
   For compatibility with entries shared by python, we convert options to a
   map structure rather than a list of lists.

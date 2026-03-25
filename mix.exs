@@ -2,7 +2,7 @@ defmodule Oban.Met.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/oban-bg/oban_met"
-  @version "1.0.6"
+  @version "1.1.0"
 
   def project do
     [
@@ -97,7 +97,7 @@ defmodule Oban.Met.MixProject do
 
   defp deps do
     [
-      {:oban, "~> 2.19", github: "oban-bg/oban"},
+      {:oban, "~> 2.21"},
       {:ecto_sqlite3, "~> 0.18", only: [:test, :dev]},
       {:postgrex, "~> 0.20", only: [:test, :dev]},
       {:stream_data, "~> 1.1", only: [:test, :dev]},
