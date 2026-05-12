@@ -26,9 +26,9 @@ defmodule Oban.Met.RecorderTest do
       labels = %{"node" => @node, "queue" => "default", "worker" => "A"}
 
       with_backoff(fn ->
-        assert [{{"a", _, ^time}, ^time, ^labels, _}] = lookup(:a)
-        assert [{{"b", _, ^time}, ^time, ^labels, _}] = lookup(:b)
-        assert [{{"c", _, ^time}, ^time, ^labels, _}] = lookup(:c)
+        assert [{{"a", ^time, _}, ^time, ^labels, _}] = lookup(:a)
+        assert [{{"b", ^time, _}, ^time, ^labels, _}] = lookup(:b)
+        assert [{{"c", ^time, _}, ^time, ^labels, _}] = lookup(:c)
       end)
     end
   end
@@ -244,7 +244,7 @@ defmodule Oban.Met.RecorderTest do
       assert [9, 9, 9] =
                :a
                |> lookup()
-               |> Enum.map(fn {{_, _, max_ts}, min_ts, _, _} -> max_ts - min_ts end)
+               |> Enum.map(fn {{_, max_ts, _}, min_ts, _, _} -> max_ts - min_ts end)
     end
 
     test "compacted values are separated by series and labels" do
