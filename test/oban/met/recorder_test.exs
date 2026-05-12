@@ -310,32 +310,26 @@ defmodule Oban.Met.RecorderTest do
     test "compacting on an interval", %{conf: conf} do
       pid = start_supervised!({Recorder, conf: conf, name: @name, compact_periods: [{5, 60}]})
 
-      store(:a, 4, %{queue: :alpha}, time: ts(-3))
-      store(:a, 3, %{queue: :alpha}, time: ts(-4))
-      store(:a, 2, %{queue: :alpha}, time: ts(-6))
-      store(:a, 1, %{queue: :alpha}, time: ts(-7))
+      store(:a, 4, %{queue: :alpha}, time: ts(-4))
+      store(:a, 3, %{queue: :alpha}, time: ts(-5))
+      store(:a, 2, %{queue: :alpha}, time: ts(-10))
+      store(:a, 1, %{queue: :alpha}, time: ts(-11))
 
-      store(:b, Sketch.new([4, 3]), %{queue: :alpha}, time: ts(-3))
-      store(:b, Sketch.new([3, 2]), %{queue: :alpha}, time: ts(-4))
-      store(:b, Sketch.new([2, 1]), %{queue: :alpha}, time: ts(-6))
+      store(:b, Sketch.new([4, 3]), %{queue: :alpha}, time: ts(-4))
+      store(:b, Sketch.new([3, 2]), %{queue: :alpha}, time: ts(-5))
+      store(:b, Sketch.new([2, 1]), %{queue: :alpha}, time: ts(-10))
 
       assert length(lookup(:a)) == 4
       assert length(lookup(:b)) == 3
 
-      {:heap_size, heap_1} = :erlang.process_info(pid, :heap_size)
-
       send(pid, :compact)
 
-      Process.sleep(10)
+      with_backoff(fn ->
+        assert length(lookup(:a)) == 2
+        assert length(lookup(:b)) == 2
+      end)
 
-      {:heap_size, heap_2} = :erlang.process_info(pid, :heap_size)
-
-      assert heap_1 >= heap_2
-
-      assert length(lookup(:a)) == 2
-      assert length(lookup(:b)) == 2
-
-      assert %{"all" => 7} = latest(:a, lookback: 5)
+      assert %{"all" => 7} = latest(:a, lookback: 6)
     end
   end
 

@@ -170,10 +170,10 @@ defmodule Oban.Met.Recorder do
   def init(opts) do
     table =
       :ets.new(:metrics, [
-        :compressed,
         :ordered_set,
-        :protected,
-        read_concurrency: true
+        :public,
+        read_concurrency: true,
+        write_concurrency: true
       ])
 
     state =
@@ -203,7 +203,7 @@ defmodule Oban.Met.Recorder do
 
   @impl GenServer
   def handle_call({:compact, periods}, _from, %State{table: table} = state) do
-    inner_compact(table, periods)
+    inner_compact(table, periods, System.system_time(:second))
 
     {:reply, :ok, state}
   end
@@ -270,11 +270,11 @@ defmodule Oban.Met.Recorder do
   end
 
   def handle_info(:compact, %State{compact_periods: periods, table: table} = state) do
-    inner_compact(table, periods)
+    # Shift the window back 2 seconds so concurrent writes (always at time=now)
+    # can't fall inside the range that select+select_delete operates on.
+    Task.start(fn -> inner_compact(table, periods, System.system_time(:second) - 2) end)
 
-    :erlang.garbage_collect()
-
-    {:noreply, schedule_compact(state), :hibernate}
+    {:noreply, schedule_compact(state)}
   end
 
   defp from_map(%{"size" => _} = value), do: Sketch.from_map(value)
@@ -292,10 +292,10 @@ defmodule Oban.Met.Recorder do
     end
   end
 
-  defp inner_compact(table, periods) do
-    delete_outdated(table, periods)
+  defp inner_compact(table, periods, now) do
+    delete_outdated(table, periods, now)
 
-    Enum.reduce(periods, System.system_time(:second), fn {step, duration}, ts ->
+    Enum.reduce(periods, now, fn {step, duration}, ts ->
       since = ts - duration
       match = {{:_, :_, :"$1"}, :"$2", :_, :_}
       guard = [{:andalso, {:>=, :"$2", since}, {:"=<", :"$1", ts}}]
@@ -326,11 +326,10 @@ defmodule Oban.Met.Recorder do
     {{series, lab_key, max_ts}, min_ts, labels, value}
   end
 
-  defp delete_outdated(table, periods) do
-    systime = System.system_time(:second)
+  defp delete_outdated(table, periods, now) do
     maximum = Enum.reduce(periods, 0, fn {_, duration}, acc -> duration + acc end)
 
-    since = systime - maximum
+    since = now - maximum
     match = {{:_, :_, :"$1"}, :_, :_, :_}
     guard = [{:<, :"$1", since}]
 
