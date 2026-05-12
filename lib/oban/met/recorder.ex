@@ -300,8 +300,9 @@ defmodule Oban.Met.Recorder do
 
   # Table
 
-  defp series_table(name), do: tables(name) |> elem(0)
-  defp latest_table(name), do: tables(name) |> elem(1)
+  defp latest_table(name), do: name |> tables() |> elem(1)
+
+  defp series_table(name), do: name |> tables() |> elem(0)
 
   defp tables(name) do
     case Registry.lookup(Oban.Registry, name) do
