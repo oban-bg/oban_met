@@ -63,6 +63,8 @@ defmodule Oban.Met.Recorder do
 
     stime = Keyword.get(opts, :since, System.system_time(:second))
     lookback = Keyword.get(opts, :lookback, 120)
+
+    # Labels are served from the latest-row index keyed by `{series, label_key}`.
     match = {{:_, :_}, :"$2", :"$1", :_}
     guard = [{:andalso, {:is_map_key, label, :"$1"}, {:>=, :"$2", stime - lookback}}]
     value = [{:map_get, label, :"$1"}]
@@ -350,6 +352,8 @@ defmodule Oban.Met.Recorder do
     :ets.select_delete(latest, [{{{:_, :_}, :"$1", :_, :_}, [{:<, :"$1", since}], [true]}])
   end
 
+  defp label_key(labels), do: :erlang.phash2(labels)
+
   defp inner_store(table, latest, series, value, labels, time) do
     key = {to_string(series), label_key(labels), time}
 
@@ -403,12 +407,11 @@ defmodule Oban.Met.Recorder do
     key = {series, lab_key}
 
     case :ets.lookup(latest, key) do
+      # Compaction and handoff may replay older rows; keep the newest row per series/label set.
       [{^key, latest_time, _, _}] when latest_time > time -> :ok
       _ -> :ets.insert(latest, {key, time, labels, value})
     end
   end
-
-  defp label_key(labels), do: :erlang.phash2(labels)
 
   defp filters_to_guards(nil, _labels, base), do: base
 
