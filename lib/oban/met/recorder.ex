@@ -31,8 +31,9 @@ defmodule Oban.Met.Recorder do
   defstruct [
     :compact_timer,
     :conf,
+    :latest_table,
     :name,
-    :table,
+    :series_table,
     compact_periods: @periods,
     handoff: :awaiting
   ]
@@ -53,7 +54,9 @@ defmodule Oban.Met.Recorder do
   def lookup(name, series) do
     match = {{to_string(series), :_, :_}, :_, :_, :_}
 
-    :ets.select_reverse(table(name), [{match, [], [:"$_"]}])
+    name
+    |> series_table()
+    |> :ets.select_reverse([{match, [], [:"$_"]}])
   end
 
   @spec labels(GenServer.name(), label(), keyword()) :: [label()]
@@ -67,7 +70,7 @@ defmodule Oban.Met.Recorder do
     value = [{:map_get, label, :"$1"}]
 
     name
-    |> table()
+    |> series_table()
     |> :ets.select([{match, guard, value}])
     |> :lists.usort()
   end
@@ -80,15 +83,19 @@ defmodule Oban.Met.Recorder do
     lookback = Keyword.fetch!(opts, :lookback)
     filters = Keyword.fetch!(opts, :filters)
 
+    stime = System.system_time(:second)
+    match = {{to_string(series), :_}, :"$1", :"$2", :"$3"}
+    guard = filters_to_guards(filters, {:>=, :"$3", stime - lookback})
+    body = [{{:"$1", :"$2"}}]
+
     name
-    |> table()
-    |> select(series, lookback, filters)
-    |> Enum.dedup_by(fn {{_, _, _}, _, labels, _} -> labels end)
-    |> Enum.group_by(fn {{_, _, _}, _, labels, _} -> labels[group] || "all" end)
-    |> Map.new(fn {group, metrics} ->
+    |> latest_table()
+    |> :ets.select([{match, [guard], body}])
+    |> Enum.group_by(fn {labels, _value} -> labels[group] || "all" end)
+    |> Map.new(fn {group, entries} ->
       total =
-        metrics
-        |> Enum.map(&elem(&1, 3))
+        entries
+        |> Enum.map(&elem(&1, 1))
         |> Enum.reduce(&Value.merge/2)
         |> Value.sum()
 
@@ -101,7 +108,7 @@ defmodule Oban.Met.Recorder do
     match = {{:"$1", :_, :_}, :_, :"$2", :"$3"}
 
     name
-    |> table()
+    |> series_table()
     |> :ets.select([{match, [], [:"$$"]}])
     |> Enum.group_by(&hd/1)
     |> Enum.map(fn {series, [[_series, _labels, %vtype{}] | _] = metrics} ->
@@ -127,7 +134,7 @@ defmodule Oban.Met.Recorder do
     since = Keyword.get(opts, :since, System.system_time(:second))
 
     name
-    |> table()
+    |> series_table()
     |> select(series, lookback, opts[:filters])
     |> Enum.reduce(%{}, &merge_group(&1, &2, group))
     |> Enum.reduce(%{}, &merge_chunk(&1, &2, since, by))
@@ -168,8 +175,16 @@ defmodule Oban.Met.Recorder do
 
   @impl GenServer
   def init(opts) do
-    table =
-      :ets.new(:metrics, [
+    series_table =
+      :ets.new(:metrics_series, [
+        :ordered_set,
+        :public,
+        read_concurrency: true,
+        write_concurrency: true
+      ])
+
+    latest_table =
+      :ets.new(:metrics_latest, [
         :ordered_set,
         :public,
         read_concurrency: true,
@@ -177,11 +192,13 @@ defmodule Oban.Met.Recorder do
       ])
 
     state =
-      State
-      |> struct!(Keyword.put(opts, :table, table))
+      opts
+      |> Keyword.put(:series_table, series_table)
+      |> Keyword.put(:latest_table, latest_table)
+      |> then(&struct!(State, &1))
       |> schedule_compact()
 
-    Registry.register(Oban.Registry, state.name, table)
+    Registry.register(Oban.Registry, state.name, {series_table, latest_table})
 
     {:ok, state, {:continue, :start}}
   end
@@ -202,16 +219,16 @@ defmodule Oban.Met.Recorder do
   end
 
   @impl GenServer
-  def handle_call({:compact, periods}, _from, %State{table: table} = state) do
-    inner_compact(table, periods, System.system_time(:second))
+  def handle_call({:compact, periods}, _from, %State{} = state) do
+    inner_compact(state.series_table, state.latest_table, periods, System.system_time(:second))
 
     {:reply, :ok, state}
   end
 
-  def handle_call({:store, params}, _from, %State{table: table} = state) do
+  def handle_call({:store, params}, _from, %State{} = state) do
     {series, value, labels, time} = params
 
-    inner_store(table, series, value, labels, time)
+    inner_store(state.series_table, state.latest_table, series, value, labels, time)
 
     {:reply, :ok, state}
   end
@@ -220,7 +237,7 @@ defmodule Oban.Met.Recorder do
   def handle_info({:notification, :handoff, %{"syn" => _}}, state) do
     if Peer.leader?(state.conf) do
       data =
-        state.table
+        state.series_table
         |> :ets.tab2list()
         |> :erlang.term_to_binary()
         |> Base.encode64()
@@ -244,7 +261,9 @@ defmodule Oban.Met.Recorder do
       data
       |> Base.decode64!()
       |> :erlang.binary_to_term()
-      |> then(&:ets.insert(state.table, &1))
+      |> then(&:ets.insert(state.series_table, &1))
+
+      rebuild_latest(state.series_table, state.latest_table)
     end
 
     {:noreply, %{state | handoff: :complete}}
@@ -259,7 +278,7 @@ defmodule Oban.Met.Recorder do
         |> Map.drop(~w(series value))
         |> Map.put("node", node)
 
-      inner_store(state.table, series, from_map(value), labels, time)
+      inner_store(state.series_table, state.latest_table, series, from_map(value), labels, time)
     end
 
     {:noreply, state}
@@ -269,9 +288,13 @@ defmodule Oban.Met.Recorder do
     {:noreply, state}
   end
 
-  def handle_info(:compact, %State{compact_periods: periods, table: table} = state) do
+  def handle_info(:compact, %State{} = state) do
+    %{compact_periods: periods, series_table: series_table, latest_table: latest_table} = state
+
     # Window shifted back 2s so concurrent writes (at time=now) can't race the delete.
-    Task.start(fn -> inner_compact(table, periods, System.system_time(:second) - 2) end)
+    Task.start(fn ->
+      inner_compact(series_table, latest_table, periods, System.system_time(:second) - 2)
+    end)
 
     {:noreply, schedule_compact(state)}
   end
@@ -281,31 +304,35 @@ defmodule Oban.Met.Recorder do
 
   # Table
 
-  defp table(name) do
+  defp series_table(name), do: tables(name) |> elem(0)
+  defp latest_table(name), do: tables(name) |> elem(1)
+
+  defp tables(name) do
     case Registry.lookup(Oban.Registry, name) do
-      [{_pid, table}] ->
-        table
+      [{_pid, {_series, _latest} = pair}] ->
+        pair
 
       _ ->
         raise RuntimeError, "no table registered for #{inspect(name)}"
     end
   end
 
-  defp inner_compact(table, periods, now) do
-    delete_outdated(table, periods, now)
+  defp inner_compact(series_table, latest_table, periods, now) do
+    delete_outdated_series(series_table, periods, now)
+    delete_outdated_latest(latest_table, periods, now)
 
     Enum.reduce(periods, now, fn {step, duration}, ts ->
       since = ts - duration
       match = {{:_, :_, :"$1"}, :"$2", :_, :_}
       guard = [{:andalso, {:>=, :"$2", since}, {:"=<", :"$1", ts}}]
 
-      objects = :ets.select(table, [{match, guard, [:"$_"]}])
-      _delete = :ets.select_delete(table, [{match, guard, [true]}])
+      objects = :ets.select(series_table, [{match, guard, [:"$_"]}])
+      _delete = :ets.select_delete(series_table, [{match, guard, [true]}])
 
       objects
       |> Enum.chunk_by(fn {{ser, lab, max}, _, _, _} -> {ser, lab, div(ts - max - 1, step)} end)
       |> Enum.map(&compact_object/1)
-      |> then(&:ets.insert(table, &1))
+      |> then(&:ets.insert(series_table, &1))
 
       since
     end)
@@ -325,7 +352,7 @@ defmodule Oban.Met.Recorder do
     {{series, lab_key, max_ts}, min_ts, labels, value}
   end
 
-  defp delete_outdated(table, periods, now) do
+  defp delete_outdated_series(table, periods, now) do
     maximum = Enum.reduce(periods, 0, fn {_, duration}, acc -> duration + acc end)
 
     since = now - maximum
@@ -335,16 +362,55 @@ defmodule Oban.Met.Recorder do
     :ets.select_delete(table, [{match, guard, [true]}])
   end
 
-  defp inner_store(table, series, value, labels, time) do
-    key = {to_string(series), :erlang.phash2(labels), time}
+  defp inner_store(series_table, latest_table, series, value, labels, time) do
+    series = to_string(series)
+    hash = :erlang.phash2(labels)
+    key = {series, hash, time}
 
-    value =
-      case :ets.lookup(table, key) do
+    merged =
+      case :ets.lookup(series_table, key) do
         [{_key, _time, _labels, old_value}] -> Value.union(old_value, value)
         _ -> value
       end
 
-    :ets.insert(table, {key, time, labels, value})
+    :ets.insert(series_table, {key, time, labels, merged})
+
+    case :ets.lookup(latest_table, {series, hash}) do
+      [{_, _, _, prev_time}] when prev_time > time ->
+        :ok
+
+      [{_, _, prev_value, ^time}] ->
+        :ets.insert(latest_table, {{series, hash}, labels, Value.union(prev_value, value), time})
+
+      _ ->
+        :ets.insert(latest_table, {{series, hash}, labels, value, time})
+    end
+  end
+
+  defp delete_outdated_latest(latest_table, periods, now) do
+    maximum = Enum.reduce(periods, 0, fn {_, duration}, acc -> duration + acc end)
+    since = now - maximum
+    match = {{:_, :_}, :_, :_, :"$1"}
+    guard = [{:<, :"$1", since}]
+
+    :ets.select_delete(latest_table, [{match, guard, [true]}])
+  end
+
+  defp rebuild_latest(series_table, latest_table) do
+    :ets.delete_all_objects(latest_table)
+
+    fun = fn {{series, hash, max_ts}, _min_ts, labels, value}, acc ->
+      Map.update(acc, {series, hash}, {labels, value, max_ts}, fn
+        {_, _, prev_ts} = entry when prev_ts >= max_ts -> entry
+        _ -> {labels, value, max_ts}
+      end)
+    end
+
+    fun
+    |> :ets.foldl(%{}, series_table)
+    |> Enum.each(fn {key, {labels, value, max_ts}} ->
+      :ets.insert(latest_table, {key, labels, value, max_ts})
+    end)
   end
 
   # Scheduling
