@@ -31,6 +31,7 @@ defmodule Oban.Met.Recorder do
   defstruct [
     :compact_timer,
     :conf,
+    :latest,
     :name,
     :table,
     compact_periods: @periods,
@@ -62,12 +63,12 @@ defmodule Oban.Met.Recorder do
 
     stime = Keyword.get(opts, :since, System.system_time(:second))
     lookback = Keyword.get(opts, :lookback, 120)
-    match = {{:_, :_, :"$2"}, :_, :"$1", :_}
+    match = {{:_, :_}, :"$2", :"$1", :_}
     guard = [{:andalso, {:is_map_key, label, :"$1"}, {:>=, :"$2", stime - lookback}}]
     value = [{:map_get, label, :"$1"}]
 
     name
-    |> table()
+    |> table(:latest)
     |> :ets.select([{match, guard, value}])
     |> :lists.usort()
   end
@@ -81,10 +82,9 @@ defmodule Oban.Met.Recorder do
     filters = Keyword.fetch!(opts, :filters)
 
     name
-    |> table()
-    |> select(series, lookback, filters)
-    |> Enum.dedup_by(fn {{_, _, _}, _, labels, _} -> labels end)
-    |> Enum.group_by(fn {{_, _, _}, _, labels, _} -> labels[group] || "all" end)
+    |> table(:latest)
+    |> select_latest(series, lookback, filters)
+    |> Enum.group_by(fn {{_, _}, _, labels, _} -> labels[group] || "all" end)
     |> Map.new(fn {group, metrics} ->
       total =
         metrics
@@ -98,10 +98,10 @@ defmodule Oban.Met.Recorder do
 
   @spec series(GenServer.name()) :: [map()]
   def series(name) do
-    match = {{:"$1", :_, :_}, :_, :"$2", :"$3"}
+    match = {{:"$1", :_}, :_, :"$2", :"$3"}
 
     name
-    |> table()
+    |> table(:latest)
     |> :ets.select([{match, [], [:"$$"]}])
     |> Enum.group_by(&hd/1)
     |> Enum.map(fn {series, [[_series, _labels, %vtype{}] | _] = metrics} ->
@@ -176,12 +176,19 @@ defmodule Oban.Met.Recorder do
         read_concurrency: true
       ])
 
+    latest =
+      :ets.new(:latest_metrics, [
+        :compressed,
+        :protected,
+        read_concurrency: true
+      ])
+
     state =
       State
-      |> struct!(Keyword.put(opts, :table, table))
+      |> struct!(opts |> Keyword.put(:latest, latest) |> Keyword.put(:table, table))
       |> schedule_compact()
 
-    Registry.register(Oban.Registry, state.name, table)
+    Registry.register(Oban.Registry, state.name, %{latest: latest, metrics: table})
 
     {:ok, state, {:continue, :start}}
   end
@@ -202,16 +209,16 @@ defmodule Oban.Met.Recorder do
   end
 
   @impl GenServer
-  def handle_call({:compact, periods}, _from, %State{table: table} = state) do
-    inner_compact(table, periods)
+  def handle_call({:compact, periods}, _from, %State{latest: latest, table: table} = state) do
+    inner_compact(table, latest, periods)
 
     {:reply, :ok, state}
   end
 
-  def handle_call({:store, params}, _from, %State{table: table} = state) do
+  def handle_call({:store, params}, _from, %State{latest: latest, table: table} = state) do
     {series, value, labels, time} = params
 
-    inner_store(table, series, value, labels, time)
+    inner_store(table, latest, series, value, labels, time)
 
     {:reply, :ok, state}
   end
@@ -220,8 +227,7 @@ defmodule Oban.Met.Recorder do
   def handle_info({:notification, :handoff, %{"syn" => _}}, state) do
     if Peer.leader?(state.conf) do
       data =
-        state.table
-        |> :ets.tab2list()
+        %{latest: :ets.tab2list(state.latest), metrics: :ets.tab2list(state.table)}
         |> :erlang.term_to_binary()
         |> Base.encode64()
 
@@ -244,7 +250,10 @@ defmodule Oban.Met.Recorder do
       data
       |> Base.decode64!()
       |> :erlang.binary_to_term()
-      |> then(&:ets.insert(state.table, &1))
+      |> then(fn %{latest: latest, metrics: metrics} ->
+        :ets.insert(state.latest, latest)
+        :ets.insert(state.table, metrics)
+      end)
     end
 
     {:noreply, %{state | handoff: :complete}}
@@ -259,7 +268,7 @@ defmodule Oban.Met.Recorder do
         |> Map.drop(~w(series value))
         |> Map.put("node", node)
 
-      inner_store(state.table, series, from_map(value), labels, time)
+      inner_store(state.table, state.latest, series, from_map(value), labels, time)
     end
 
     {:noreply, state}
@@ -269,8 +278,8 @@ defmodule Oban.Met.Recorder do
     {:noreply, state}
   end
 
-  def handle_info(:compact, %State{compact_periods: periods, table: table} = state) do
-    inner_compact(table, periods)
+  def handle_info(:compact, %State{compact_periods: periods, latest: latest, table: table} = state) do
+    inner_compact(table, latest, periods)
 
     :erlang.garbage_collect()
 
@@ -282,18 +291,18 @@ defmodule Oban.Met.Recorder do
 
   # Table
 
-  defp table(name) do
+  defp table(name, which \\ :metrics) do
     case Registry.lookup(Oban.Registry, name) do
-      [{_pid, table}] ->
-        table
+      [{_pid, tables}] ->
+        Map.fetch!(tables, which)
 
       _ ->
         raise RuntimeError, "no table registered for #{inspect(name)}"
     end
   end
 
-  defp inner_compact(table, periods) do
-    delete_outdated(table, periods)
+  defp inner_compact(table, latest, periods) do
+    delete_outdated(table, latest, periods)
 
     Enum.reduce(periods, System.system_time(:second), fn {step, duration}, ts ->
       since = ts - duration
@@ -303,10 +312,13 @@ defmodule Oban.Met.Recorder do
       objects = :ets.select(table, [{match, guard, [:"$_"]}])
       _delete = :ets.select_delete(table, [{match, guard, [true]}])
 
-      objects
-      |> Enum.chunk_by(fn {{ser, lab, max}, _, _, _} -> {ser, lab, div(ts - max - 1, step)} end)
-      |> Enum.map(&compact_object/1)
-      |> then(&:ets.insert(table, &1))
+      compacted =
+        objects
+        |> Enum.chunk_by(fn {{ser, lab, max}, _, _, _} -> {ser, lab, div(ts - max - 1, step)} end)
+        |> Enum.map(&compact_object/1)
+
+      :ets.insert(table, compacted)
+      Enum.each(compacted, &put_latest_row(latest, &1))
 
       since
     end)
@@ -326,7 +338,7 @@ defmodule Oban.Met.Recorder do
     {{series, lab_key, max_ts}, min_ts, labels, value}
   end
 
-  defp delete_outdated(table, periods) do
+  defp delete_outdated(table, latest, periods) do
     systime = System.system_time(:second)
     maximum = Enum.reduce(periods, 0, fn {_, duration}, acc -> duration + acc end)
 
@@ -335,18 +347,20 @@ defmodule Oban.Met.Recorder do
     guard = [{:<, :"$1", since}]
 
     :ets.select_delete(table, [{match, guard, [true]}])
+    :ets.select_delete(latest, [{{{:_, :_}, :"$1", :_, :_}, [{:<, :"$1", since}], [true]}])
   end
 
-  defp inner_store(table, series, value, labels, time) do
-    key = {to_string(series), :erlang.phash2(labels), time}
+  defp inner_store(table, latest, series, value, labels, time) do
+    key = {to_string(series), label_key(labels), time}
 
-    value =
+    row =
       case :ets.lookup(table, key) do
-        [{_key, _time, _labels, old_value}] -> Value.union(old_value, value)
-        _ -> value
+        [{_key, _time, _labels, old_value}] -> {key, time, labels, Value.union(old_value, value)}
+        _ -> {key, time, labels, value}
       end
 
-    :ets.insert(table, {key, time, labels, value})
+    :ets.insert(table, row)
+    put_latest_row(latest, row)
   end
 
   # Scheduling
@@ -372,19 +386,38 @@ defmodule Oban.Met.Recorder do
   defp select(table, series, since, filters) do
     stime = System.system_time(:second)
     match = {{to_string(series), :_, :"$2"}, :_, :"$1", :_}
-    guard = filters_to_guards(filters, {:>=, :"$2", stime - since})
+    guard = filters_to_guards(filters, :"$1", {:>=, :"$2", stime - since})
 
     :ets.select_reverse(table, [{match, [guard], [:"$_"]}])
   end
 
-  defp filters_to_guards(nil, base), do: base
+  defp select_latest(table, series, since, filters) do
+    stime = System.system_time(:second)
+    match = {{to_string(series), :_}, :"$2", :"$1", :_}
+    guard = filters_to_guards(filters, :"$1", {:>=, :"$2", stime - since})
 
-  defp filters_to_guards(filters, base) do
+    :ets.select(table, [{match, [guard], [:"$_"]}])
+  end
+
+  defp put_latest_row(latest, {{series, lab_key, time}, _min_time, labels, value}) do
+    key = {series, lab_key}
+
+    case :ets.lookup(latest, key) do
+      [{^key, latest_time, _, _}] when latest_time > time -> :ok
+      _ -> :ets.insert(latest, {key, time, labels, value})
+    end
+  end
+
+  defp label_key(labels), do: :erlang.phash2(labels)
+
+  defp filters_to_guards(nil, _labels, base), do: base
+
+  defp filters_to_guards(filters, labels, base) do
     Enum.reduce(filters, base, fn {field, values}, and_acc ->
       and_guard =
         values
         |> List.wrap()
-        |> Enum.map(fn value -> {:==, {:map_get, to_string(field), :"$1"}, value} end)
+        |> Enum.map(fn value -> {:==, {:map_get, to_string(field), labels}, value} end)
         |> Enum.reduce(fn or_guard, or_acc -> {:orelse, or_guard, or_acc} end)
 
       {:andalso, and_guard, and_acc}

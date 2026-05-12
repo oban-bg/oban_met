@@ -302,6 +302,24 @@ defmodule Oban.Met.RecorderTest do
                |> get_in([Access.all(), Access.elem(2), :queue])
                |> Enum.sort()
     end
+
+    test "purging outdated latest labels during compaction" do
+      store(:a, 1, %{queue: :alpha}, time: ts(-119))
+      store(:a, 1, %{queue: :gamma}, time: ts(-121))
+
+      compact([{1, 60}, {1, 60}])
+
+      assert ~w(alpha) = Recorder.labels(@name, "queue", since: ts(), lookback: 120)
+    end
+
+    test "purging outdated series during compaction" do
+      store(:a, 1, %{queue: :alpha}, time: ts(-119))
+      store(:b, 1, %{queue: :gamma}, time: ts(-121))
+
+      compact([{1, 60}, {1, 60}])
+
+      assert [%{series: "a"}] = Recorder.series(@name)
+    end
   end
 
   describe "automatic compaction" do
