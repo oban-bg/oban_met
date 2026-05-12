@@ -235,7 +235,7 @@ defmodule Oban.Met.Recorder do
       data =
         state.series_table
         |> :ets.tab2list()
-        |> :erlang.term_to_binary()
+        |> :erlang.term_to_binary([:compressed])
         |> Base.encode64()
 
       payload = %{
