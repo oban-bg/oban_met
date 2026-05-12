@@ -65,12 +65,12 @@ defmodule Oban.Met.Recorder do
 
     stime = Keyword.get(opts, :since, System.system_time(:second))
     lookback = Keyword.get(opts, :lookback, 120)
-    match = {{:_, :_, :"$2"}, :_, :"$1", :_}
+    match = {{:_, :_}, :"$1", :_, :"$2"}
     guard = [{:andalso, {:is_map_key, label, :"$1"}, {:>=, :"$2", stime - lookback}}]
     value = [{:map_get, label, :"$1"}]
 
     name
-    |> series_table()
+    |> latest_table()
     |> :ets.select([{match, guard, value}])
     |> :lists.usort()
   end
@@ -91,24 +91,18 @@ defmodule Oban.Met.Recorder do
     name
     |> latest_table()
     |> :ets.select([{match, [guard], body}])
-    |> Enum.group_by(fn {labels, _value} -> labels[group] || "all" end)
-    |> Map.new(fn {group, entries} ->
-      total =
-        entries
-        |> Enum.map(&elem(&1, 1))
-        |> Enum.reduce(&Value.merge/2)
-        |> Value.sum()
-
-      {group, total}
+    |> Enum.reduce(%{}, fn {labels, value}, acc ->
+      Map.update(acc, labels[group] || "all", value, &Value.merge(&1, value))
     end)
+    |> Map.new(fn {group, merged} -> {group, Value.sum(merged)} end)
   end
 
   @spec series(GenServer.name()) :: [map()]
   def series(name) do
-    match = {{:"$1", :_, :_}, :_, :"$2", :"$3"}
+    match = {{:"$1", :_}, :"$2", :"$3", :_}
 
     name
-    |> series_table()
+    |> latest_table()
     |> :ets.select([{match, [], [:"$$"]}])
     |> Enum.group_by(&hd/1)
     |> Enum.map(fn {series, [[_series, _labels, %vtype{}] | _] = metrics} ->
