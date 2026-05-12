@@ -383,18 +383,18 @@ defmodule Oban.Met.Recorder do
 
   # Fetching & Filtering
 
-  defp select(table, series, since, filters) do
+  defp select(table, series, lookback, filters) do
     stime = System.system_time(:second)
     match = {{to_string(series), :_, :"$2"}, :_, :"$1", :_}
-    guard = filters_to_guards(filters, :"$1", {:>=, :"$2", stime - since})
+    guard = filters_to_guards(filters, :"$1", {:>=, :"$2", stime - lookback})
 
     :ets.select_reverse(table, [{match, [guard], [:"$_"]}])
   end
 
-  defp select_latest(table, series, since, filters) do
+  defp select_latest(table, series, lookback, filters) do
     stime = System.system_time(:second)
     match = {{to_string(series), :_}, :"$2", :"$1", :_}
-    guard = filters_to_guards(filters, :"$1", {:>=, :"$2", stime - since})
+    guard = filters_to_guards(filters, :"$1", {:>=, :"$2", stime - lookback})
 
     :ets.select(table, [{match, [guard], [:"$_"]}])
   end
