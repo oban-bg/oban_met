@@ -16,7 +16,7 @@ defmodule Oban.Met.Recorder do
   @type ts :: integer()
   @type period :: {pos_integer(), pos_integer()}
 
-  @periods [{1, 300}, {5, 1_200}, {30, 3_600}, {60, 7_200}]
+  @periods [{1, 120}, {5, 900}, {30, 2_000}, {60, 9_300}]
 
   @default_latest_opts [filters: [], group: nil, lookback: 2]
 
@@ -270,8 +270,7 @@ defmodule Oban.Met.Recorder do
   end
 
   def handle_info(:compact, %State{compact_periods: periods, table: table} = state) do
-    # Shift the window back 2 seconds so concurrent writes (always at time=now)
-    # can't fall inside the range that select+select_delete operates on.
+    # Window shifted back 2s so concurrent writes (at time=now) can't race the delete.
     Task.start(fn -> inner_compact(table, periods, System.system_time(:second) - 2) end)
 
     {:noreply, schedule_compact(state)}
