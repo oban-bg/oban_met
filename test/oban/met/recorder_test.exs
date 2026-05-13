@@ -345,27 +345,21 @@ defmodule Oban.Met.RecorderTest do
     end
 
     @tag oban_opts: [peer: Oban.Peers.Isolated, testing: :disabled]
-    test "replying with a handoff message from a leader", %{conf: conf} do
+    test "not replying to its own syn", %{conf: conf} do
       Notifier.listen(conf.name, :handoff)
 
       start_supervised!({Recorder, conf: conf, name: @name})
 
       assert_receive {:notification, :handoff, %{"syn" => true}}
 
-      # Not ideal, but this test flickers in older versions of OTP
-      Process.sleep(50)
-
-      # Fake a response from another node
-      Notifier.notify(conf, :handoff, %{syn: true, module: Recorder})
-
-      assert_receive {:notification, :handoff, %{"ack" => true, "data" => _}}
+      refute_receive {:notification, :handoff, %{"ack" => true}}, 200
     end
 
     @tag oban_opts: [notifier: Oban.Notifiers.PG, peer: Oban.Peers.Isolated, testing: :disabled]
-    test "replicating the leader's table from the handoff", %{conf: conf} do
-      Notifier.listen(conf.name, :handoff)
+    test "replicating the leader's table from the handoff", %{conf: conf_1} do
+      Notifier.listen(conf_1.name, :handoff)
 
-      start_supervised!({Recorder, conf: conf, name: @name})
+      start_supervised!({Recorder, conf: conf_1, name: @name})
 
       assert_receive {:notification, :handoff, %{"syn" => true}}
 
@@ -373,8 +367,11 @@ defmodule Oban.Met.RecorderTest do
       store(:a, 1, %{"queue" => "gamma"}, time: ts())
       store(:a, 1, %{"queue" => "delta"}, time: ts())
 
-      {:ok, [conf: conf]} = start_supervised_oban(%{oban_opts: [notifier: Oban.Notifiers.PG]})
-      start_supervised!({Recorder, conf: conf, name: Recorder.B})
+      {:ok, [conf: conf_2]} = start_supervised_oban(%{oban_opts: [notifier: Oban.Notifiers.PG]})
+
+      Notifier.listen(conf_2.name, :handoff)
+
+      start_supervised!({Recorder, conf: conf_2, name: Recorder.B})
 
       assert_receive {:notification, :handoff, %{"ack" => true, "data" => _}}
     end

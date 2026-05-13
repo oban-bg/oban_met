@@ -230,9 +230,15 @@ defmodule Oban.Met.Recorder do
   end
 
   @impl GenServer
-  def handle_info({:notification, :handoff, %{"syn" => _}}, state) do
-    if Peer.leader?(state.conf) do
+  def handle_info({:notification, :handoff, %{"syn" => _} = msg}, state) do
+    from_name = Map.fetch!(msg, "name")
+    from_node = Map.fetch!(msg, "node")
+    own_name = inspect(state.conf.name)
+    own_node = state.conf.node
+
+    if {from_name, from_node} != {own_name, own_node} and Peer.leader?(state.conf) do
       %{conf: conf, series_table: series_table} = state
+      target_ident = from_name <> "." <> to_string(from_node)
 
       Task.start_link(fn ->
         data =
@@ -244,6 +250,7 @@ defmodule Oban.Met.Recorder do
         payload = %{
           ack: true,
           module: __MODULE__,
+          ident: target_ident,
           data: data,
           node: conf.node,
           name: inspect(conf.name)
