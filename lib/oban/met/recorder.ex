@@ -232,21 +232,25 @@ defmodule Oban.Met.Recorder do
   @impl GenServer
   def handle_info({:notification, :handoff, %{"syn" => _}}, state) do
     if Peer.leader?(state.conf) do
-      data =
-        state.series_table
-        |> :ets.tab2list()
-        |> :erlang.term_to_binary([:compressed])
-        |> Base.encode64()
+      %{conf: conf, series_table: series_table} = state
 
-      payload = %{
-        ack: true,
-        module: __MODULE__,
-        data: data,
-        node: state.conf.node,
-        name: inspect(state.conf.name)
-      }
+      Task.start_link(fn ->
+        data =
+          series_table
+          |> :ets.tab2list()
+          |> :erlang.term_to_binary([:compressed])
+          |> Base.encode64()
 
-      Notifier.notify(state.conf, :handoff, payload)
+        payload = %{
+          ack: true,
+          module: __MODULE__,
+          data: data,
+          node: conf.node,
+          name: inspect(conf.name)
+        }
+
+        Notifier.notify(conf, :handoff, payload)
+      end)
     end
 
     {:noreply, state}
