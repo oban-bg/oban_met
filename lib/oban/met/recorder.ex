@@ -258,12 +258,16 @@ defmodule Oban.Met.Recorder do
 
   def handle_info({:notification, :handoff, %{"ack" => _, "data" => data}}, %State{} = state) do
     if state.handoff == :awaiting and not Peer.leader?(state.conf) do
-      data
-      |> Base.decode64!()
-      |> :erlang.binary_to_term()
-      |> then(&:ets.insert(state.series_table, &1))
+      %{series_table: series_table, latest_table: latest_table} = state
 
-      rebuild_latest(state.series_table, state.latest_table)
+      Task.start_link(fn ->
+        data
+        |> Base.decode64!()
+        |> :erlang.binary_to_term()
+        |> then(&:ets.insert(series_table, &1))
+
+        rebuild_latest(series_table, latest_table)
+      end)
     end
 
     {:noreply, %{state | handoff: :complete}}
@@ -398,8 +402,6 @@ defmodule Oban.Met.Recorder do
   end
 
   defp rebuild_latest(series_table, latest_table) do
-    :ets.delete_all_objects(latest_table)
-
     fun = fn {{series, max_ts, hash}, _min_ts, labels, value}, acc ->
       Map.update(acc, {series, hash}, {labels, value, max_ts}, fn
         {_, _, prev_ts} = entry when prev_ts >= max_ts -> entry
@@ -410,7 +412,10 @@ defmodule Oban.Met.Recorder do
     fun
     |> :ets.foldl(%{}, series_table)
     |> Enum.each(fn {key, {labels, value, max_ts}} ->
-      :ets.insert(latest_table, {key, labels, value, max_ts})
+      case :ets.lookup(latest_table, key) do
+        [{_, _, _, prev_ts}] when prev_ts >= max_ts -> :ok
+        _ -> :ets.insert(latest_table, {key, labels, value, max_ts})
+      end
     end)
   end
 
