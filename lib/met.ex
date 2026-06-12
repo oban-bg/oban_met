@@ -115,7 +115,7 @@ defmodule Oban.Met do
 
       Oban.Met.checks()
 
-  Get current checks for a non-standard Oban isntance:
+  Get current checks for a non-standard Oban instance:
 
       Oban.Met.checks(MyOban)
   """
@@ -191,7 +191,7 @@ defmodule Oban.Met do
   ## Gauge Series
 
   Latest counts only apply to `Gauge` series. There are two gauges available (as reported by
-  `series/1`:
+  `series/1`):
 
   * `:exec_count` — jobs executing at that moment, including `node`, `queue`, `state`, and
     `worker` labels.
@@ -261,7 +261,7 @@ defmodule Oban.Met do
 
   ## Examples
 
-  Retreive a 3 second timeslice of the `exec_time` sketch:
+  Retrieve a 3 second timeslice of the `exec_time` sketch:
 
       Oban.Met.timeslice(Oban, :exec_time, lookback: 3)
       [

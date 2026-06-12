@@ -73,6 +73,28 @@ you must explicitly include `oban_met` as a dependency for "workers".
 No configuration is necessary and Oban Met will start automatically in a typical application. A
 variety of options are provided for more complex or nuanced usage.
 
+### Configuration
+
+Met starts without configuration, but every supervised component accepts options that may be
+provided two ways:
+
+* Through the **application environment**, where they apply to all Oban instances:
+
+  ```elixir
+  config :oban_met, reporter: [estimate_limit: 200_000]
+  ```
+
+* Through the **plugin specification**, where they apply to a single instance and take precedence
+  over the application environment:
+
+  ```elixir
+  {Oban.Met, reporter: [estimate_limit: 200_000]}
+  ```
+
+Options are namespaced by component: `:cronitor`, `:examiner`, `:listener`, `:recorder`, and
+`:reporter`. Most are internal and best left alone, but the sections below cover the options worth
+tuning.
+
 ### Auto Start
 
 Supervised Met instances start automatically along with Oban instances unless Oban is in testing
@@ -89,6 +111,14 @@ plugins: [
   Oban.Met,
   ...
 ]
+```
+
+By default Met only starts when Oban's `:testing` mode is `:disabled`. To run Met under a specific
+testing mode, for example to inspect metrics during `:manual` tests, add the mode to
+`:auto_testing_modes`:
+
+```elixir
+config :oban_met, auto_testing_modes: [:disabled, :manual]
 ```
 
 ### Customizing Estimates
@@ -144,6 +174,21 @@ explicit migration:
 ```elixir
 {Oban.Met, reporter: [auto_migrate: false]}
 ```
+
+### Compaction Periods
+
+Recorded metrics are periodically compacted into coarser windows to bound memory use. Each period
+is a `{step, duration}` tuple in seconds, where `step` is the resolution and `duration` is how long
+values are retained at that resolution. The defaults keep roughly two hours of history:
+
+```elixir
+{Oban.Met, recorder: [compact_periods: [{1, 120}, {5, 900}, {30, 2_000}, {60, 9_300}]]}
+```
+
+> #### Web Charts {: .neutral}
+>
+> Oban Web's charts are rendered from these recorded metrics. Drastically shortening the periods
+> reduces the history available to plot and may impact chart rendering.
 
 ### Sketch Time Unit
 
