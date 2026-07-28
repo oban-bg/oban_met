@@ -174,6 +174,7 @@ defmodule Oban.Met.Recorder do
   def init(opts) do
     series_table =
       :ets.new(:metrics_series, [
+        :compressed,
         :ordered_set,
         :public,
         read_concurrency: true,
@@ -393,7 +394,6 @@ defmodule Oban.Met.Recorder do
       case :ets.lookup(table, key) do
         [{^key, {{^series, prev_max, ^lab_key}, prev_min, _labels, prev_value}}] ->
           {{series, max(max_ts, prev_max), lab_key}, min(min_ts, prev_min), labels,
-
            Value.merge(value, prev_value)}
 
         [] ->
