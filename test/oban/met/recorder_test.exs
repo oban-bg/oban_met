@@ -201,6 +201,14 @@ defmodule Oban.Met.RecorderTest do
 
       assert [3, 3] = timeslice_values(:a, operation: {:pct, 1.0})
     end
+
+    test "selecting metrics across internal chunks" do
+      for offset <- 1..750 do
+        store(:a, 1, %{"queue" => "alpha"}, time: ts(-offset))
+      end
+
+      assert 750 = :a |> timeslice(lookback: 750) |> length()
+    end
   end
 
   describe "compact/2" do
@@ -289,6 +297,18 @@ defmodule Oban.Met.RecorderTest do
       assert compacted_1 == compacted_2
     end
 
+    test "compacting groups split across internal chunks" do
+      for offset <- 1..750 do
+        store(:a, 1, %{"queue" => "alpha"}, time: ts(-offset))
+      end
+
+      compact([{1_000, 750}])
+
+      assert [{{"a", max_ts, _}, min_ts, %{"queue" => "alpha"}, gauge}] = lookup(:a)
+      assert max_ts - min_ts == 749
+      assert Gauge.sum(gauge) == 750
+    end
+
     test "deleting metrics beyond the final period" do
       store(:a, 1, %{queue: :alpha}, time: ts(-119))
       store(:a, 1, %{queue: :gamma}, time: ts(-120))
@@ -327,6 +347,10 @@ defmodule Oban.Met.RecorderTest do
       with_backoff(fn ->
         assert length(lookup(:a)) == 2
         assert length(lookup(:b)) == 2
+      end)
+
+      with_backoff(fn ->
+        assert %{compact_task: nil} = :sys.get_state(pid)
       end)
 
       assert %{"all" => 4} = latest(:a, lookback: 6)

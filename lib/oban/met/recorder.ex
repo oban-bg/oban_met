@@ -31,6 +31,7 @@ defmodule Oban.Met.Recorder do
   ]
 
   defstruct [
+    :compact_task,
     :compact_timer,
     :conf,
     :latest_table,
@@ -299,15 +300,26 @@ defmodule Oban.Met.Recorder do
     {:noreply, state}
   end
 
-  def handle_info(:compact, %State{} = state) do
+  def handle_info(:compact, %State{compact_task: nil} = state) do
     %{compact_periods: periods, series_table: series_table, latest_table: latest_table} = state
 
     # Window shifted back 2s so concurrent writes (at time=now) can't race the delete.
-    Task.start(fn ->
-      inner_compact(series_table, latest_table, periods, System.system_time(:second) - 2)
-    end)
+    {:ok, pid} =
+      Task.start(fn ->
+        inner_compact(series_table, latest_table, periods, System.system_time(:second) - 2)
+      end)
+
+    state = Map.put(state, :compact_task, {pid, Process.monitor(pid)})
 
     {:noreply, schedule_compact(state)}
+  end
+
+  def handle_info(:compact, %State{} = state) do
+    {:noreply, schedule_compact(state)}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %State{compact_task: {_, ref}} = state) do
+    {:noreply, %{state | compact_task: nil}}
   end
 
   defp from_map(%{"size" => _} = value), do: Sketch.from_map(value)
@@ -335,19 +347,60 @@ defmodule Oban.Met.Recorder do
 
     Enum.reduce(periods, now, fn {step, duration}, ts ->
       since = ts - duration
-      match = {{:_, :"$1", :_}, :"$2", :_, :_}
-      guard = [{:andalso, {:>=, :"$2", since}, {:"=<", :"$1", ts}}]
-
-      objects = :ets.select(series_table, [{match, guard, [:"$_"]}])
-      _delete = :ets.select_delete(series_table, [{match, guard, [true]}])
-
-      objects
-      |> Enum.group_by(fn {{ser, max, lab}, _, _, _} -> {ser, lab, div(ts - max - 1, step)} end)
-      |> Enum.map(fn {_chunk, metrics} -> compact_object(metrics) end)
-      |> then(&:ets.insert(series_table, &1))
+      compact_period(series_table, step, since, ts)
 
       since
     end)
+  end
+
+  defp compact_period(series_table, step, since, until) do
+    table = :ets.new(:metrics_compacted, [:set, :private])
+    match = {{:_, :"$1", :_}, :"$2", :_, :_}
+    guard = [{:andalso, {:>=, :"$2", since}, {:"=<", :"$1", until}}]
+    spec = [{match, guard, [:"$_"]}]
+
+    try do
+      series_table
+      |> :ets.select(spec, @chunk_size)
+      |> reduce_chunks(table, fn objects, table ->
+        objects
+        |> Enum.group_by(fn {{series, max_ts, lab_key}, _, _, _} ->
+          {series, lab_key, div(until - max_ts - 1, step)}
+        end)
+        |> Enum.each(fn {key, metrics} ->
+          merge_compacted(table, key, compact_object(metrics))
+        end)
+
+        {:cont, table}
+      end)
+
+      _delete = :ets.select_delete(series_table, [{match, guard, [true]}])
+
+      table
+      |> :ets.select([{{:_, :"$1"}, [], [:"$1"]}], @chunk_size)
+      |> reduce_chunks(:ok, fn objects, :ok ->
+        true = :ets.insert(series_table, objects)
+
+        {:cont, :ok}
+      end)
+    after
+      :ets.delete(table)
+    end
+  end
+
+  defp merge_compacted(table, key, {{series, max_ts, lab_key}, min_ts, labels, value}) do
+    object =
+      case :ets.lookup(table, key) do
+        [{^key, {{^series, prev_max, ^lab_key}, prev_min, _labels, prev_value}}] ->
+          {{series, max(max_ts, prev_max), lab_key}, min(min_ts, prev_min), labels,
+
+           Value.merge(value, prev_value)}
+
+        [] ->
+          {{series, max_ts, lab_key}, min_ts, labels, value}
+      end
+
+    :ets.insert(table, {key, object})
   end
 
   defp compact_object([{{series, _, lab_key}, _, labels, _} | _] = metrics) do
@@ -456,32 +509,27 @@ defmodule Oban.Met.Recorder do
         _ -> []
       end
 
-    case :ets.select_reverse(table, [{match, conditions, [:"$_"]}], @chunk_size) do
-      {rows, cont} -> collect_until(rows, cont, cutoff, [])
-      :"$end_of_table" -> []
+    table
+    |> :ets.select_reverse([{match, conditions, [:"$_"]}], @chunk_size)
+    |> reduce_chunks([], fn rows, acc -> take_recent(rows, cutoff, acc) end)
+  end
+
+  defp reduce_chunks(:"$end_of_table", acc, _fun), do: acc
+
+  defp reduce_chunks({rows, cont}, acc, fun) do
+    case fun.(rows, acc) do
+      {:halt, acc} -> acc
+      {:cont, acc} -> cont |> :ets.select() |> reduce_chunks(acc, fun)
     end
   end
 
-  defp collect_until(rows, cont, cutoff, acc) do
-    case take_recent(rows, cutoff, acc) do
-      {:done, acc} ->
-        acc
-
-      {:continue, acc} ->
-        case :ets.select(cont) do
-          {more, more_cont} -> collect_until(more, more_cont, cutoff, acc)
-          :"$end_of_table" -> acc
-        end
-    end
-  end
-
-  defp take_recent([], _cutoff, acc), do: {:continue, acc}
+  defp take_recent([], _cutoff, acc), do: {:cont, acc}
 
   defp take_recent([{{_, max_ts, _}, _, _, _} = row | rest], cutoff, acc) when max_ts >= cutoff do
     take_recent(rest, cutoff, [row | acc])
   end
 
-  defp take_recent(_, _cutoff, acc), do: {:done, acc}
+  defp take_recent(_, _cutoff, acc), do: {:halt, acc}
 
   defp filters_to_guards(nil, base), do: base
 
