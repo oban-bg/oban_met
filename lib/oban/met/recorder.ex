@@ -39,12 +39,15 @@ defmodule Oban.Met.Recorder do
     :compact_timer,
     :conf,
     :handoff_task,
+    :handoff_timer,
     :latest_table,
     :name,
     :series_table,
     compact_periods: @periods,
     handoff: :awaiting,
-    handoff_size: @handoff_size
+    handoff_queue: [],
+    handoff_size: @handoff_size,
+    handoff_timeout: @handoff_timeout
   ]
 
   @spec child_spec(keyword()) :: Supervisor.child_spec()
@@ -248,29 +251,32 @@ defmodule Oban.Met.Recorder do
 
   @impl GenServer
   def handle_info({:notification, :handoff, %{"syn" => _} = msg}, %State{} = state) do
-    if transferable?(state, msg) do
-      {:noreply, start_transfer(state, to_ident(msg))}
-    else
-      {:noreply, state}
+    ident = to_ident(msg)
+
+    cond do
+      not requestable?(state, msg) -> {:noreply, state}
+      busy?(state) -> {:noreply, queue_transfer(state, ident)}
+      true -> {:noreply, start_transfer(state, ident)}
     end
   end
 
   def handle_info({:notification, :handoff, %{"rows" => rows} = msg}, %State{} = state) do
-    %{"final" => final?, "seq" => seq, "xfer" => xfer} = msg
+    %{"final" => final?, "seq" => seq, "xfr" => xfr} = msg
 
-    if acceptable?(state, xfer, seq) do
-      insert_rows(state, rows)
+    case chunk_status(state, xfr, seq) do
+      :insert ->
+        insert_rows(state, rows)
+        ack_chunk(state.conf, msg)
 
-      Notifier.notify(state.conf, :handoff, %{
-        ack: true,
-        ident: to_ident(msg),
-        seq: seq,
-        xfer: xfer
-      })
+        {:noreply, track_chunk(state, xfr, seq, final?)}
 
-      {:noreply, %{state | handoff: if(final?, do: :complete, else: {xfer, seq + 1})}}
-    else
-      {:noreply, state}
+      :repeat ->
+        ack_chunk(state.conf, msg)
+
+        {:noreply, state}
+
+      :ignore ->
+        {:noreply, state}
     end
   end
 
@@ -292,10 +298,10 @@ defmodule Oban.Met.Recorder do
   end
 
   def handle_info({:notification, :handoff, %{"ack" => _} = msg}, %State{} = state) do
-    %{"seq" => seq, "xfer" => xfer} = msg
+    %{"seq" => seq, "xfr" => xfr} = msg
 
     case state.handoff_task do
-      {pid, _ref, ^xfer} -> send(pid, {:ack, xfer, seq})
+      {pid, _ref, ^xfr} -> send(pid, {:ack, xfr, seq})
       _ -> :ok
     end
 
@@ -321,7 +327,15 @@ defmodule Oban.Met.Recorder do
     {:noreply, state}
   end
 
-  def handle_info(:compact, %State{compact_task: nil} = state) do
+  def handle_info(:handoff_timeout, %State{handoff: {_xfr, _seq}} = state) do
+    {:noreply, %{state | handoff: :awaiting, handoff_timer: nil}}
+  end
+
+  def handle_info(:handoff_timeout, %State{} = state) do
+    {:noreply, state}
+  end
+
+  def handle_info(:compact, %State{compact_task: nil, handoff_task: nil} = state) do
     %{compact_periods: periods, series_table: series_table, latest_table: latest_table} = state
 
     # Window shifted back 2s so concurrent writes (at time=now) can't race the delete.
@@ -340,11 +354,11 @@ defmodule Oban.Met.Recorder do
   end
 
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{compact_task: {_, ref}} = state) do
-    {:noreply, %{state | compact_task: nil}}
+    {:noreply, start_next_transfer(%{state | compact_task: nil})}
   end
 
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{handoff_task: {_, ref, _}} = state) do
-    {:noreply, %{state | handoff_task: nil}}
+    {:noreply, start_next_transfer(%{state | handoff_task: nil})}
   end
 
   defp from_map(%{"size" => _} = value), do: Sketch.from_map(value)
@@ -373,7 +387,7 @@ defmodule Oban.Met.Recorder do
 
   defp to_ident(msg), do: Map.fetch!(msg, "name") <> "." <> to_string(Map.fetch!(msg, "node"))
 
-  defp transferable?(%State{conf: conf, handoff_task: nil}, msg) do
+  defp requestable?(%State{conf: conf}, msg) do
     own_node? = {msg["name"], msg["node"]} == {inspect(conf.name), conf.node}
 
     not own_node? and
@@ -382,56 +396,112 @@ defmodule Oban.Met.Recorder do
       Peer.leader?(conf)
   end
 
-  defp transferable?(_state, _msg), do: false
+  # Compaction rewrites rows in place, so a traversal that straddles it would send both the
+  # original rows and the merged replacement.
+  defp busy?(%State{compact_task: nil, handoff_task: nil}), do: false
+  defp busy?(_state), do: true
 
-  defp acceptable?(%State{handoff: :awaiting}, _xfer, 0), do: true
-  defp acceptable?(%State{handoff: {xfer, seq}}, xfer, seq), do: true
-  defp acceptable?(_state, _xfer, _seq), do: false
+  defp chunk_status(%State{handoff: :awaiting}, _xfr, 0), do: :insert
+  defp chunk_status(%State{handoff: {xfr, seq}}, xfr, seq), do: :insert
+  defp chunk_status(%State{handoff: {xfr, next}}, xfr, seq) when seq == next - 1, do: :repeat
+  defp chunk_status(_state, _xfr, _seq), do: :ignore
+
+  defp ack_chunk(conf, msg) do
+    payload = %{ack: true, ident: to_ident(msg), seq: msg["seq"], xfr: msg["xfr"]}
+
+    Notifier.notify(conf, :handoff, payload)
+  end
+
+  defp track_chunk(%State{} = state, xfr, seq, final?) do
+    state = cancel_handoff_timer(state)
+
+    if final? do
+      %{state | handoff: :complete}
+    else
+      timer = Process.send_after(self(), :handoff_timeout, state.handoff_timeout)
+
+      %{state | handoff: {xfr, seq + 1}, handoff_timer: timer}
+    end
+  end
+
+  defp cancel_handoff_timer(%State{handoff_timer: nil} = state), do: state
+
+  defp cancel_handoff_timer(%State{handoff_timer: timer} = state) do
+    Process.cancel_timer(timer)
+
+    %{state | handoff_timer: nil}
+  end
+
+  # Requests are prepended and taken from the tail so the earliest one transfers first.
+  defp queue_transfer(%State{handoff_queue: queue} = state, ident) do
+    if ident in queue do
+      state
+    else
+      %{state | handoff_queue: [ident | queue]}
+    end
+  end
+
+  defp start_next_transfer(%State{handoff_queue: []} = state), do: state
+
+  defp start_next_transfer(%State{handoff_queue: queue} = state) do
+    {ident, rest} = List.pop_at(queue, -1)
+
+    start_transfer(%{state | handoff_queue: rest}, ident)
+  end
 
   defp start_transfer(%State{} = state, ident) do
-    %{conf: conf, handoff_size: size, series_table: series_table} = state
-
-    xfer =
+    xfr =
       8
       |> :crypto.strong_rand_bytes()
       |> Base.encode16(case: :lower)
 
-    {:ok, pid} = Task.start(fn -> run_transfer(conf, series_table, ident, xfer, size) end)
+    transfer = %{
+      conf: state.conf,
+      ident: ident,
+      size: state.handoff_size,
+      table: state.series_table,
+      timeout: state.handoff_timeout,
+      xfr: xfr
+    }
 
-    %{state | handoff_task: {pid, Process.monitor(pid), xfer}}
+    {:ok, pid} = Task.start(fn -> run_transfer(transfer) end)
+
+    %{state | handoff_task: {pid, Process.monitor(pid), xfr}}
   end
 
-  defp run_transfer(conf, series_table, ident, xfer, size) do
+  defp run_transfer(transfer) do
     match = {{:_, :_, :_}, :_, :_, :_}
 
-    series_table
-    |> :ets.select([{match, [], [:"$_"]}], size)
-    |> send_chunks(conf, ident, xfer, 0)
+    transfer.table
+    |> :ets.select([{match, [], [:"$_"]}], transfer.size)
+    |> send_chunks(transfer, 0)
   end
 
   # A trailing empty chunk terminates the transfer because a continuation can't report that the
   # current batch is the last one without reading ahead.
-  defp send_chunks(:"$end_of_table", conf, ident, xfer, seq) do
-    send_chunk(conf, ident, xfer, seq, [], true)
+  defp send_chunks(:"$end_of_table", transfer, seq) do
+    send_chunk(transfer, seq, [], true)
 
-    await_ack(xfer, seq)
+    await_ack(transfer, seq)
   end
 
-  defp send_chunks({rows, cont}, conf, ident, xfer, seq) do
-    send_chunk(conf, ident, xfer, seq, rows, false)
+  defp send_chunks({rows, cont}, transfer, seq) do
+    send_chunk(transfer, seq, rows, false)
 
-    case await_ack(xfer, seq) do
+    case await_ack(transfer, seq) do
       :ok ->
         cont
         |> :ets.select()
-        |> send_chunks(conf, ident, xfer, seq + 1)
+        |> send_chunks(transfer, seq + 1)
 
       :error ->
         :error
     end
   end
 
-  defp send_chunk(conf, ident, xfer, seq, rows, final?) do
+  defp send_chunk(transfer, seq, rows, final?) do
+    %{conf: conf, ident: ident, xfr: xfr} = transfer
+
     payload = %{
       final: final?,
       ident: ident,
@@ -440,17 +510,17 @@ defmodule Oban.Met.Recorder do
       rows: encode_rows(rows),
       seq: seq,
       vsn: @handoff_vsn,
-      xfer: xfer
+      xfr: xfr
     }
 
     Notifier.notify(conf, :handoff, payload)
   end
 
-  defp await_ack(xfer, seq) do
+  defp await_ack(%{timeout: timeout, xfr: xfr}, seq) do
     receive do
-      {:ack, ^xfer, ^seq} -> :ok
+      {:ack, ^xfr, ^seq} -> :ok
     after
-      @handoff_timeout -> :error
+      timeout -> :error
     end
   end
 

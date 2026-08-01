@@ -477,6 +477,24 @@ defmodule Oban.Met.RecorderTest do
 
       refute_receive {_event, ^ref, _measure, %{channel: :handoff, conf: %{name: ^name}}}
     end
+
+    @tag oban_opts: [notifier: PG, peer: Isolated, testing: :disabled]
+    test "replicating the leader's tables to multiple receivers", %{conf: conf_1} do
+      start_supervised!({Recorder, conf: conf_1, name: @name, handoff_size: 1})
+
+      for queue <- ~w(alpha gamma delta), do: store(:a, 1, %{"queue" => queue}, time: ts())
+
+      {:ok, [conf: conf_2]} = start_supervised_oban(%{oban_opts: [notifier: PG]})
+      {:ok, [conf: conf_3]} = start_supervised_oban(%{oban_opts: [notifier: PG]})
+
+      start_supervised!({Recorder, conf: conf_2, name: Recorder.B})
+      start_supervised!({Recorder, conf: conf_3, name: Recorder.C})
+
+      with_backoff(fn ->
+        assert Recorder.lookup(@name, :a) == Recorder.lookup(Recorder.B, :a)
+        assert Recorder.lookup(@name, :a) == Recorder.lookup(Recorder.C, :a)
+      end)
+    end
   end
 
   defp start_supervised_recorder(%{conf: conf}) do
