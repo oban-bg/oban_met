@@ -18,6 +18,10 @@ defmodule Oban.Met.Recorder do
 
   @chunk_size 500
 
+  @handoff_size 5_000
+  @handoff_timeout :timer.seconds(15)
+  @handoff_vsn 1
+
   @periods [{1, 120}, {5, 900}, {30, 2_000}, {60, 9_300}]
 
   @default_latest_opts [filters: [], group: nil, lookback: 2]
@@ -34,11 +38,13 @@ defmodule Oban.Met.Recorder do
     :compact_task,
     :compact_timer,
     :conf,
+    :handoff_task,
     :latest_table,
     :name,
     :series_table,
     compact_periods: @periods,
-    handoff: :awaiting
+    handoff: :awaiting,
+    handoff_size: @handoff_size
   ]
 
   @spec child_spec(keyword()) :: Supervisor.child_spec()
@@ -205,7 +211,13 @@ defmodule Oban.Met.Recorder do
   def handle_continue(:start, %State{conf: conf} = state) do
     state =
       if handoff?(conf) do
-        payload = %{module: __MODULE__, name: inspect(conf.name), node: conf.node, syn: true}
+        payload = %{
+          module: __MODULE__,
+          name: inspect(conf.name),
+          node: conf.node,
+          syn: true,
+          vsn: @handoff_vsn
+        }
 
         Notifier.notify(conf.name, :handoff, payload)
 
@@ -235,37 +247,31 @@ defmodule Oban.Met.Recorder do
   end
 
   @impl GenServer
-  def handle_info({:notification, :handoff, %{"syn" => _} = msg}, state) do
-    from_name = Map.fetch!(msg, "name")
-    from_node = Map.fetch!(msg, "node")
-
-    diff_node? = {from_name, from_node} != {inspect(state.conf.name), state.conf.node}
-
-    if diff_node? and handoff?(state.conf) and Peer.leader?(state.conf) do
-      %{conf: conf, series_table: series_table} = state
-      target_ident = from_name <> "." <> to_string(from_node)
-
-      Task.start_link(fn ->
-        data =
-          series_table
-          |> :ets.tab2list()
-          |> :erlang.term_to_binary([:compressed])
-          |> Base.encode64()
-
-        payload = %{
-          ack: true,
-          module: __MODULE__,
-          ident: target_ident,
-          data: data,
-          node: conf.node,
-          name: inspect(conf.name)
-        }
-
-        Notifier.notify(conf, :handoff, payload)
-      end)
+  def handle_info({:notification, :handoff, %{"syn" => _} = msg}, %State{} = state) do
+    if transferable?(state, msg) do
+      {:noreply, start_transfer(state, to_ident(msg))}
+    else
+      {:noreply, state}
     end
+  end
 
-    {:noreply, state}
+  def handle_info({:notification, :handoff, %{"rows" => rows} = msg}, %State{} = state) do
+    %{"final" => final?, "seq" => seq, "xfer" => xfer} = msg
+
+    if acceptable?(state, xfer, seq) do
+      insert_rows(state, rows)
+
+      Notifier.notify(state.conf, :handoff, %{
+        ack: true,
+        ident: to_ident(msg),
+        seq: seq,
+        xfer: xfer
+      })
+
+      {:noreply, %{state | handoff: if(final?, do: :complete, else: {xfer, seq + 1})}}
+    else
+      {:noreply, state}
+    end
   end
 
   def handle_info({:notification, :handoff, %{"ack" => _, "data" => data}}, %State{} = state) do
@@ -283,6 +289,17 @@ defmodule Oban.Met.Recorder do
     end
 
     {:noreply, %{state | handoff: :complete}}
+  end
+
+  def handle_info({:notification, :handoff, %{"ack" => _} = msg}, %State{} = state) do
+    %{"seq" => seq, "xfer" => xfer} = msg
+
+    case state.handoff_task do
+      {pid, _ref, ^xfer} -> send(pid, {:ack, xfer, seq})
+      _ -> :ok
+    end
+
+    {:noreply, state}
   end
 
   def handle_info({:notification, :metrics, %{"metrics" => _} = payload}, state) do
@@ -322,8 +339,12 @@ defmodule Oban.Met.Recorder do
     {:noreply, schedule_compact(state)}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, %State{compact_task: {_, ref}} = state) do
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{compact_task: {_, ref}} = state) do
     {:noreply, %{state | compact_task: nil}}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{handoff_task: {_, ref, _}} = state) do
+    {:noreply, %{state | handoff_task: nil}}
   end
 
   defp from_map(%{"size" => _} = value), do: Sketch.from_map(value)
@@ -331,8 +352,117 @@ defmodule Oban.Met.Recorder do
 
   # Handoff
 
+  @doc false
+  @spec encode_rows([tuple()]) :: [list()]
+  def encode_rows(rows) do
+    for {{series, max_ts, hash}, min_ts, labels, value} <- rows do
+      [series, max_ts, hash, min_ts, labels, value]
+    end
+  end
+
+  @doc false
+  @spec decode_rows([list()]) :: [tuple()]
+  def decode_rows(rows) do
+    for [series, max_ts, hash, min_ts, labels, value] <- rows do
+      {{series, max_ts, hash}, min_ts, labels, from_map(value)}
+    end
+  end
+
   defp handoff?(%{notifier: {Oban.Notifiers.PG, _opts}}), do: true
   defp handoff?(_conf), do: false
+
+  defp to_ident(msg), do: Map.fetch!(msg, "name") <> "." <> to_string(Map.fetch!(msg, "node"))
+
+  defp transferable?(%State{conf: conf, handoff_task: nil}, msg) do
+    own_node? = {msg["name"], msg["node"]} == {inspect(conf.name), conf.node}
+
+    not own_node? and
+      Map.get(msg, "vsn", 0) >= @handoff_vsn and
+      handoff?(conf) and
+      Peer.leader?(conf)
+  end
+
+  defp transferable?(_state, _msg), do: false
+
+  defp acceptable?(%State{handoff: :awaiting}, _xfer, 0), do: true
+  defp acceptable?(%State{handoff: {xfer, seq}}, xfer, seq), do: true
+  defp acceptable?(_state, _xfer, _seq), do: false
+
+  defp start_transfer(%State{} = state, ident) do
+    %{conf: conf, handoff_size: size, series_table: series_table} = state
+
+    xfer =
+      8
+      |> :crypto.strong_rand_bytes()
+      |> Base.encode16(case: :lower)
+
+    {:ok, pid} = Task.start(fn -> run_transfer(conf, series_table, ident, xfer, size) end)
+
+    %{state | handoff_task: {pid, Process.monitor(pid), xfer}}
+  end
+
+  defp run_transfer(conf, series_table, ident, xfer, size) do
+    match = {{:_, :_, :_}, :_, :_, :_}
+
+    series_table
+    |> :ets.select([{match, [], [:"$_"]}], size)
+    |> send_chunks(conf, ident, xfer, 0)
+  end
+
+  # A trailing empty chunk terminates the transfer because a continuation can't report that the
+  # current batch is the last one without reading ahead.
+  defp send_chunks(:"$end_of_table", conf, ident, xfer, seq) do
+    send_chunk(conf, ident, xfer, seq, [], true)
+
+    await_ack(xfer, seq)
+  end
+
+  defp send_chunks({rows, cont}, conf, ident, xfer, seq) do
+    send_chunk(conf, ident, xfer, seq, rows, false)
+
+    case await_ack(xfer, seq) do
+      :ok ->
+        cont
+        |> :ets.select()
+        |> send_chunks(conf, ident, xfer, seq + 1)
+
+      :error ->
+        :error
+    end
+  end
+
+  defp send_chunk(conf, ident, xfer, seq, rows, final?) do
+    payload = %{
+      final: final?,
+      ident: ident,
+      name: inspect(conf.name),
+      node: conf.node,
+      rows: encode_rows(rows),
+      seq: seq,
+      vsn: @handoff_vsn,
+      xfer: xfer
+    }
+
+    Notifier.notify(conf, :handoff, payload)
+  end
+
+  defp await_ack(xfer, seq) do
+    receive do
+      {:ack, ^xfer, ^seq} -> :ok
+    after
+      @handoff_timeout -> :error
+    end
+  end
+
+  defp insert_rows(state, rows) do
+    rows = decode_rows(rows)
+
+    :ets.insert(state.series_table, rows)
+
+    rows
+    |> Enum.reduce(%{}, &latest_reduce/2)
+    |> write_latest(state.latest_table)
+  end
 
   # Table
 
@@ -470,16 +600,20 @@ defmodule Oban.Met.Recorder do
   end
 
   defp rebuild_latest(series_table, latest_table) do
-    fun = fn {{series, max_ts, hash}, _min_ts, labels, value}, acc ->
-      Map.update(acc, {series, hash}, {labels, value, max_ts}, fn
-        {_, _, prev_ts} = entry when prev_ts >= max_ts -> entry
-        _ -> {labels, value, max_ts}
-      end)
-    end
-
-    fun
+    (&latest_reduce/2)
     |> :ets.foldl(%{}, series_table)
-    |> Enum.each(fn {key, {labels, value, max_ts}} ->
+    |> write_latest(latest_table)
+  end
+
+  defp latest_reduce({{series, max_ts, hash}, _min_ts, labels, value}, acc) do
+    Map.update(acc, {series, hash}, {labels, value, max_ts}, fn
+      {_, _, prev_ts} = entry when prev_ts >= max_ts -> entry
+      _ -> {labels, value, max_ts}
+    end)
+  end
+
+  defp write_latest(latest, latest_table) do
+    Enum.each(latest, fn {key, {labels, value, max_ts}} ->
       case :ets.lookup(latest_table, key) do
         [{_, _, _, prev_ts}] when prev_ts >= max_ts -> :ok
         _ -> :ets.insert(latest_table, {key, labels, value, max_ts})

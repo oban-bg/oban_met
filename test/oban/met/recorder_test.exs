@@ -359,6 +359,28 @@ defmodule Oban.Met.RecorderTest do
     end
   end
 
+  describe "encode_rows/1 and decode_rows/1" do
+    test "round tripping rows through the notifier's wire format" do
+      labels = %{"node" => "web.1", "queue" => "alpha", "state" => "executing"}
+
+      rows = [
+        {{"exec_count", 140, 1}, 140, labels, Gauge.new([1, 2, 3])},
+        {{"exec_time", 120, 2}, 90, %{"queue" => "gamma"}, Sketch.new([1, 2, 3])},
+        {{"wait_time", 100, 3}, 100, %{}, Sketch.new(1)}
+      ]
+
+      decoded =
+        rows
+        |> Recorder.encode_rows()
+        |> then(&Notifier.encode(%{rows: &1}))
+        |> Notifier.decode()
+        |> Map.fetch!("rows")
+        |> Recorder.decode_rows()
+
+      assert rows == decoded
+    end
+  end
+
   describe "handoffs" do
     setup :start_supervised_oban
 
@@ -378,21 +400,34 @@ defmodule Oban.Met.RecorderTest do
       start_supervised!({Recorder, conf: conf, name: @name})
 
       assert_receive {:notification, :handoff, %{"syn" => true}}
-
-      refute_receive {:notification, :handoff, %{"ack" => true}}, 200
+      refute_receive {:notification, :handoff, %{"rows" => _}}, 200
     end
 
     @tag oban_opts: [notifier: PG, peer: Isolated, testing: :disabled]
-    test "replicating the leader's table from the handoff", %{conf: conf_1} do
-      Notifier.listen(conf_1.name, :handoff)
-
+    test "replicating the leader's tables from the handoff", %{conf: conf_1} do
       start_supervised!({Recorder, conf: conf_1, name: @name})
 
-      assert_receive {:notification, :handoff, %{"syn" => true}}
-
       store(:a, 1, %{"queue" => "alpha"}, time: ts())
-      store(:a, 1, %{"queue" => "gamma"}, time: ts())
-      store(:a, 1, %{"queue" => "delta"}, time: ts())
+      store(:a, 2, %{"queue" => "gamma"}, time: ts(-1))
+      store(:b, Sketch.new([1, 2, 3]), %{"queue" => "delta"}, time: ts())
+
+      {:ok, [conf: conf_2]} = start_supervised_oban(%{oban_opts: [notifier: PG]})
+
+      start_supervised!({Recorder, conf: conf_2, name: Recorder.B})
+
+      with_backoff(fn ->
+        assert Recorder.lookup(@name, :a) == Recorder.lookup(Recorder.B, :a)
+        assert Recorder.lookup(@name, :b) == Recorder.lookup(Recorder.B, :b)
+        assert Recorder.latest(@name, :a) == Recorder.latest(Recorder.B, :a)
+        assert Recorder.series(@name) == Recorder.series(Recorder.B)
+      end)
+    end
+
+    @tag oban_opts: [notifier: PG, peer: Isolated, testing: :disabled]
+    test "replicating the leader's tables across multiple chunks", %{conf: conf_1} do
+      start_supervised!({Recorder, conf: conf_1, name: @name, handoff_size: 1})
+
+      for queue <- ~w(alpha gamma delta), do: store(:a, 1, %{"queue" => queue}, time: ts())
 
       {:ok, [conf: conf_2]} = start_supervised_oban(%{oban_opts: [notifier: PG]})
 
@@ -400,7 +435,26 @@ defmodule Oban.Met.RecorderTest do
 
       start_supervised!({Recorder, conf: conf_2, name: Recorder.B})
 
-      assert_receive {:notification, :handoff, %{"ack" => true, "data" => _}}
+      assert_receive {:notification, :handoff, %{"seq" => 0, "final" => false}}
+      assert_receive {:notification, :handoff, %{"seq" => 2, "final" => false}}
+      assert_receive {:notification, :handoff, %{"seq" => 3, "final" => true, "rows" => []}}
+
+      with_backoff(fn ->
+        assert Recorder.lookup(@name, :a) == Recorder.lookup(Recorder.B, :a)
+      end)
+    end
+
+    @tag oban_opts: [notifier: PG, peer: Isolated, testing: :disabled]
+    test "completing a handoff from an empty table", %{conf: conf_1} do
+      start_supervised!({Recorder, conf: conf_1, name: @name})
+
+      {:ok, [conf: conf_2]} = start_supervised_oban(%{oban_opts: [notifier: PG]})
+
+      Notifier.listen(conf_2.name, :handoff)
+
+      start_supervised!({Recorder, conf: conf_2, name: Recorder.B})
+
+      assert_receive {:notification, :handoff, %{"seq" => 0, "final" => true, "rows" => []}}
     end
 
     @tag oban_opts: [notifier: Postgres, peer: Isolated, testing: :disabled]
