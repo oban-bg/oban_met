@@ -5,6 +5,8 @@ defmodule Oban.Met.RecorderTest do
   alias Oban.Met.Recorder
   alias Oban.Met.Values.{Gauge, Sketch}
   alias Oban.Notifier
+  alias Oban.Notifiers.{PG, Postgres}
+  alias Oban.Peers.Isolated
 
   @name Oban.Recorder
   @node "worker.1"
@@ -360,6 +362,7 @@ defmodule Oban.Met.RecorderTest do
   describe "handoffs" do
     setup :start_supervised_oban
 
+    @tag oban_opts: [notifier: PG]
     test "broadcasting an online announcement after init", %{conf: conf} do
       Notifier.listen(conf.name, :handoff)
 
@@ -368,7 +371,7 @@ defmodule Oban.Met.RecorderTest do
       assert_receive {:notification, :handoff, %{"syn" => true, "module" => _}}
     end
 
-    @tag oban_opts: [peer: Oban.Peers.Isolated, testing: :disabled]
+    @tag oban_opts: [notifier: PG, peer: Isolated, testing: :disabled]
     test "not replying to its own syn", %{conf: conf} do
       Notifier.listen(conf.name, :handoff)
 
@@ -379,7 +382,7 @@ defmodule Oban.Met.RecorderTest do
       refute_receive {:notification, :handoff, %{"ack" => true}}, 200
     end
 
-    @tag oban_opts: [notifier: Oban.Notifiers.PG, peer: Oban.Peers.Isolated, testing: :disabled]
+    @tag oban_opts: [notifier: PG, peer: Isolated, testing: :disabled]
     test "replicating the leader's table from the handoff", %{conf: conf_1} do
       Notifier.listen(conf_1.name, :handoff)
 
@@ -391,13 +394,34 @@ defmodule Oban.Met.RecorderTest do
       store(:a, 1, %{"queue" => "gamma"}, time: ts())
       store(:a, 1, %{"queue" => "delta"}, time: ts())
 
-      {:ok, [conf: conf_2]} = start_supervised_oban(%{oban_opts: [notifier: Oban.Notifiers.PG]})
+      {:ok, [conf: conf_2]} = start_supervised_oban(%{oban_opts: [notifier: PG]})
 
       Notifier.listen(conf_2.name, :handoff)
 
       start_supervised!({Recorder, conf: conf_2, name: Recorder.B})
 
       assert_receive {:notification, :handoff, %{"ack" => true, "data" => _}}
+    end
+
+    @tag oban_opts: [notifier: Postgres, peer: Isolated, testing: :disabled]
+    test "skipping handoff entirely with the Postgres notifier", %{conf: conf} do
+      %{name: name} = conf
+
+      # Notifications are observed through telemetry because the Postgres notifier can't deliver
+      # anything in the sandbox, which would make a refute_receive on :notification vacuous.
+      ref = :telemetry_test.attach_event_handlers(self(), [[:oban, :notifier, :notify, :start]])
+
+      on_exit(fn -> :telemetry.detach(ref) end)
+
+      pid = start_supervised!({Recorder, conf: conf, name: @name})
+
+      refute_receive {_event, ^ref, _measure, %{channel: :handoff, conf: %{name: ^name}}}
+
+      syn = %{"syn" => true, "module" => Recorder, "name" => "Oban", "node" => "worker.2"}
+
+      send(pid, {:notification, :handoff, syn})
+
+      refute_receive {_event, ^ref, _measure, %{channel: :handoff, conf: %{name: ^name}}}
     end
   end
 

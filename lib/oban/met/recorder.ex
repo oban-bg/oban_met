@@ -203,14 +203,17 @@ defmodule Oban.Met.Recorder do
 
   @impl GenServer
   def handle_continue(:start, %State{conf: conf} = state) do
-    payload = %{
-      syn: true,
-      module: __MODULE__,
-      name: inspect(conf.name),
-      node: conf.node
-    }
+    state =
+      if handoff?(conf) do
+        payload = %{module: __MODULE__, name: inspect(conf.name), node: conf.node, syn: true}
 
-    Notifier.notify(conf.name, :handoff, payload)
+        Notifier.notify(conf.name, :handoff, payload)
+
+        state
+      else
+        %{state | handoff: :complete}
+      end
+
     Notifier.listen(conf.name, [:gossip, :handoff, :metrics])
 
     {:noreply, state}
@@ -235,10 +238,10 @@ defmodule Oban.Met.Recorder do
   def handle_info({:notification, :handoff, %{"syn" => _} = msg}, state) do
     from_name = Map.fetch!(msg, "name")
     from_node = Map.fetch!(msg, "node")
-    own_name = inspect(state.conf.name)
-    own_node = state.conf.node
 
-    if {from_name, from_node} != {own_name, own_node} and Peer.leader?(state.conf) do
+    diff_node? = {from_name, from_node} != {inspect(state.conf.name), state.conf.node}
+
+    if diff_node? and handoff?(state.conf) and Peer.leader?(state.conf) do
       %{conf: conf, series_table: series_table} = state
       target_ident = from_name <> "." <> to_string(from_node)
 
@@ -325,6 +328,11 @@ defmodule Oban.Met.Recorder do
 
   defp from_map(%{"size" => _} = value), do: Sketch.from_map(value)
   defp from_map(value), do: Gauge.from_map(value)
+
+  # Handoff
+
+  defp handoff?(%{notifier: {Oban.Notifiers.PG, _opts}}), do: true
+  defp handoff?(_conf), do: false
 
   # Table
 
