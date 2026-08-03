@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Enhancements
+
+- [Reporter] Add `:estimate_function` option to inject the estimate function DDL
+
+  The reporter installs a built-in PostgreSQL `oban_count_estimate` function under
+  `auto_migrate`. The new `(prefix -> ddl)` builder lets Postgres-compatible engines that can't run
+  that definition (CockroachDB, for example) supply their own while keeping `auto_migrate` enabled.
+
 ### Bug fixes
 
 - [Reporter] Make the estimate query portable across Postgres-compatible engines

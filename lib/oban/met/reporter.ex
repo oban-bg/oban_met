@@ -39,6 +39,7 @@ defmodule Oban.Met.Reporter do
     checks: @empty_states,
     check_counter: 0,
     check_interval: :timer.seconds(1),
+    estimate_function: &Migration.oban_count_estimate/1,
     estimate_limit: 50_000,
     function_created?: false,
     queues: []
@@ -142,7 +143,10 @@ defmodule Oban.Met.Reporter do
   defp create_estimate_function(%{auto_migrate: true, function_created?: false} = state) do
     %{conf: %{prefix: prefix}} = state
 
-    query = Migration.oban_count_estimate(prefix)
+    # `estimate_function` is a `(prefix -> ddl)` builder, defaulting to the built-in PostgreSQL
+    # `oban_count_estimate`. Override it to install an engine-appropriate definition (e.g. for
+    # CockroachDB, whose adapter is indistinguishable from PostgreSQL) while keeping auto_migrate.
+    query = state.estimate_function.(prefix)
 
     Repo.query!(state.conf, query, [])
 

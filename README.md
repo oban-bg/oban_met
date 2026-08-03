@@ -175,6 +175,18 @@ explicit migration:
 {Oban.Met, reporter: [auto_migrate: false]}
 ```
 
+### Customizing the Estimate Function
+
+By default the reporter installs and calls the built-in PostgreSQL `oban_count_estimate` function.
+On other Postgres-compatible engines that can't run that definition — CockroachDB, for example,
+which reports the same adapter as PostgreSQL and so can't be detected automatically — you can
+supply your own `(prefix -> ddl)` builder and keep `auto_migrate` enabled. The returned DDL must
+create a `<prefix>.oban_count_estimate(text, text)` function returning an integer estimate:
+
+```elixir
+{Oban.Met, reporter: [estimate_function: &MyApp.ObanEstimate.build/1]}
+```
+
 ### Compaction Periods
 
 Recorded metrics are periodically compacted into coarser windows to bound memory use. Each period

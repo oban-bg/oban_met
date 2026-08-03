@@ -100,6 +100,34 @@ defmodule Oban.Met.ReporterTest do
                )
     end
 
+    @tag oban_opts: [peer: Oban.Peers.Isolated, testing: :disabled]
+    test "installing a custom estimate function via :estimate_function", %{conf: conf} do
+      # A builder that installs a sentinel function returning a constant estimate, so a value of
+      # 42 in the reported metrics proves the injected builder ran in place of the default.
+      builder = fn prefix ->
+        """
+        CREATE OR REPLACE FUNCTION #{prefix}.oban_count_estimate(state text, queue text)
+        RETURNS integer AS $$ SELECT 42 $$ LANGUAGE sql
+        """
+      end
+
+      # estimate_limit: 0 routes every state through the estimate path.
+      pid =
+        start_supervised!(
+          {Reporter, conf: conf, name: @name, estimate_limit: 0, estimate_function: builder}
+        )
+
+      Oban.insert!(conf.name, Job.new(%{}, queue: "alpha", worker: "Worker.A"))
+
+      Notifier.listen(conf.name, [:metrics])
+      send(pid, :checkpoint)
+
+      assert_receive {:notification, :metrics, %{"metrics" => metrics}}
+
+      assert ~w(alpha) = utake(metrics, "queue")
+      assert [%{"data" => [42]}] = utake(metrics, "value")
+    end
+
     @tag lite: true
     @tag oban_opts: [engine: Oban.Engines.Lite, repo: Oban.Met.LiteRepo, testing: :disabled]
     test "reporting estimates for the Lite engine", %{conf: conf} do
