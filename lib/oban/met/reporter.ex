@@ -203,8 +203,14 @@ defmodule Oban.Met.Reporter do
   defp guess_query(_states, [], _conf), do: where(Job, [_], false)
 
   defp guess_query(states, queues, conf) when is_list(states) and is_list(queues) do
-    from(p in fragment("json_array_elements_text(?)", ^queues),
-      cross_join: x in fragment("json_array_elements_text(?)", ^states),
+    # Each set-returning function is wrapped in a derived table with an explicit column-list
+    # alias, `AS t(value)`, so the projected column is reliably named `value`. A bare table
+    # alias (`json_array_elements_text(?) AS f0`) keeps the `value` column on PostgreSQL but
+    # renames it to the alias on CockroachDB, where `f0."value"` then fails to resolve. The
+    # column-list alias is standard SQL and behaves identically on both engines.
+    from(p in fragment("(SELECT value FROM json_array_elements_text(?) AS t(value))", ^queues),
+      cross_join:
+        x in fragment("(SELECT value FROM json_array_elements_text(?) AS t(value))", ^states),
       select: %{
         series: :full_count,
         state: x.value,

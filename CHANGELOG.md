@@ -1,5 +1,16 @@
 # Changelog for Oban Met v1.3
 
+## Unreleased
+
+### Bug fixes
+
+- [Reporter] Make the estimate query portable across Postgres-compatible engines
+
+  The estimate path referenced a set-returning function's `value` column through a bare table
+  alias, which resolves on PostgreSQL but fails on CockroachDB (the alias renames the column).
+  Wrapping each function in a derived table with a column-list alias (`AS t(value)`) is standard
+  SQL and behaves identically on both engines.
+
 ## v1.3.0 — 2026-08-01
 
 ### Enhancements
