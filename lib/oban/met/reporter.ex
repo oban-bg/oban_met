@@ -200,13 +200,18 @@ defmodule Oban.Met.Reporter do
     |> group_by([j], [j.state, j.queue])
   end
 
+  defmacrop json_values(values) do
+    quote do
+      fragment("(SELECT value FROM json_array_elements_text(?) AS t(value))", unquote(values))
+    end
+  end
+
   defp guess_query([], _queues, _conf), do: where(Job, [_], false)
   defp guess_query(_states, [], _conf), do: where(Job, [_], false)
 
   defp guess_query(states, queues, conf) when is_list(states) and is_list(queues) do
-    from(p in fragment("(SELECT value FROM json_array_elements_text(?) AS t(value))", ^queues),
-      cross_join:
-        x in fragment("(SELECT value FROM json_array_elements_text(?) AS t(value))", ^states),
+    from(p in json_values(^queues),
+      cross_join: x in json_values(^states),
       select: %{
         series: :full_count,
         state: x.value,
