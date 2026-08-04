@@ -143,9 +143,6 @@ defmodule Oban.Met.Reporter do
   defp create_estimate_function(%{auto_migrate: true, function_created?: false} = state) do
     %{conf: %{prefix: prefix}} = state
 
-    # `estimate_function` is a `(prefix -> ddl)` builder, defaulting to the built-in PostgreSQL
-    # `oban_count_estimate`. Override it to install an engine-appropriate definition (e.g. for
-    # CockroachDB, whose adapter is indistinguishable from PostgreSQL) while keeping auto_migrate.
     query = state.estimate_function.(prefix)
 
     Repo.query!(state.conf, query, [])
@@ -207,11 +204,6 @@ defmodule Oban.Met.Reporter do
   defp guess_query(_states, [], _conf), do: where(Job, [_], false)
 
   defp guess_query(states, queues, conf) when is_list(states) and is_list(queues) do
-    # Each set-returning function is wrapped in a derived table with an explicit column-list
-    # alias, `AS t(value)`, so the projected column is reliably named `value`. A bare table
-    # alias (`json_array_elements_text(?) AS f0`) keeps the `value` column on PostgreSQL but
-    # renames it to the alias on CockroachDB, where `f0."value"` then fails to resolve. The
-    # column-list alias is standard SQL and behaves identically on both engines.
     from(p in fragment("(SELECT value FROM json_array_elements_text(?) AS t(value))", ^queues),
       cross_join:
         x in fragment("(SELECT value FROM json_array_elements_text(?) AS t(value))", ^states),

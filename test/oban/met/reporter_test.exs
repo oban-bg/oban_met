@@ -102,8 +102,6 @@ defmodule Oban.Met.ReporterTest do
 
     @tag oban_opts: [peer: Oban.Peers.Isolated, testing: :disabled]
     test "installing a custom estimate function via :estimate_function", %{conf: conf} do
-      # A builder that installs a sentinel function returning a constant estimate, so a value of
-      # 42 in the reported metrics proves the injected builder ran in place of the default.
       builder = fn prefix ->
         """
         CREATE OR REPLACE FUNCTION #{prefix}.oban_count_estimate(state text, queue text)
