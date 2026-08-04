@@ -178,10 +178,9 @@ explicit migration:
 ### Customizing the Estimate Function
 
 By default the reporter installs and calls the built-in PostgreSQL `oban_count_estimate` function.
-On other Postgres-compatible engines that can't run that definition — CockroachDB, for example,
-which reports the same adapter as PostgreSQL and so can't be detected automatically — you can
+On other Postgres-compatible engines that can't run that definition (e.g. CockroachDB) you can
 supply your own `(prefix -> ddl)` builder and keep `auto_migrate` enabled. The returned DDL must
-create a `<prefix>.oban_count_estimate(text, text)` function returning an integer estimate:
+create a `<prefix>.oban_count_estimate(state text, queue text)` function returning an integer estimate:
 
 ```elixir
 {Oban.Met, reporter: [estimate_function: &MyApp.ObanEstimate.build/1]}
