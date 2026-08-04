@@ -39,6 +39,7 @@ defmodule Oban.Met.Reporter do
     checks: @empty_states,
     check_counter: 0,
     check_interval: :timer.seconds(1),
+    estimate_function: &Migration.oban_count_estimate/1,
     estimate_limit: 50_000,
     function_created?: false,
     queues: []
@@ -142,7 +143,7 @@ defmodule Oban.Met.Reporter do
   defp create_estimate_function(%{auto_migrate: true, function_created?: false} = state) do
     %{conf: %{prefix: prefix}} = state
 
-    query = Migration.oban_count_estimate(prefix)
+    query = state.estimate_function.(prefix)
 
     Repo.query!(state.conf, query, [])
 
@@ -199,12 +200,18 @@ defmodule Oban.Met.Reporter do
     |> group_by([j], [j.state, j.queue])
   end
 
+  defmacrop json_values(values) do
+    quote do
+      fragment("(SELECT value FROM json_array_elements_text(?) AS t(value))", unquote(values))
+    end
+  end
+
   defp guess_query([], _queues, _conf), do: where(Job, [_], false)
   defp guess_query(_states, [], _conf), do: where(Job, [_], false)
 
   defp guess_query(states, queues, conf) when is_list(states) and is_list(queues) do
-    from(p in fragment("json_array_elements_text(?)", ^queues),
-      cross_join: x in fragment("json_array_elements_text(?)", ^states),
+    from(p in json_values(^queues),
+      cross_join: x in json_values(^states),
       select: %{
         series: :full_count,
         state: x.value,
