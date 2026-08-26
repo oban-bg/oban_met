@@ -1,5 +1,27 @@
 # Changelog for Oban Met v1.3
 
+## v1.3.1 — 2026-08-26
+
+### Enhancements
+
+- [Recorder] Make the job-count estimator pluggable
+
+  Wrap set-returning estimate functions in derived tables with explicit column-list aliases for
+  CockroachDB compatibility. This avoids alias resolution that causes undefined-column errors once
+  a state reaches `estimate_limit`, which could cause a crash-loop.
+
+  Add an `:estimate_function` option for supplying an estimate function DDL. The option accepts a
+  `(prefix -> ddl)` builder and defaults to the existing `oban_count_estimate` implementation.
+  That preserves current behavior and allows engines that don't support dynamic explains to use
+  compatible implementations and retain `auto_migrate`.
+
+### Bug Fixes
+
+- [Cronitor] Handle new Oban.Cron name from Oban v2.24
+
+  Oban v2.24 elevated `Oban.Cron` from a plugin to a standard service, and renamed it accordingly.
+  Now both the new and old name formats are supported by the `Cronitor` module.
+
 ## v1.3.0 — 2026-08-01
 
 ### Enhancements
