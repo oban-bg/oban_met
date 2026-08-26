@@ -78,9 +78,12 @@ defmodule Oban.Met.Cronitor do
   def handle_info(:share, %State{} = state) do
     %{name: name, node: node, plugins: plugins} = state.conf
 
+    # Oban v2.24 renamed Oban.Plugins.Cron to Oban.Cron and normalizes either name to the new one
+    # in the config, but older versions only ever have the legacy name.
+    cron_opts = Keyword.get(plugins, Oban.Cron) || Keyword.get(plugins, Oban.Plugins.Cron) || []
+
     crontab =
-      plugins
-      |> Keyword.get(Oban.Plugins.Cron, [])
+      cron_opts
       |> Keyword.get(:crontab, [])
       |> Enum.map(fn
         {expr, work} -> {expr, inspect(work), %{}}

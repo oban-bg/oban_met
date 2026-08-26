@@ -45,6 +45,18 @@ defmodule Oban.Met.CronitorTest do
                ["4 * * * *", "MyApp.WorkerD", %{"priority" => 3}]
              ] == crontab
     end
+
+    test "sharing crontab configured with the flattened cron module", %{conf: conf} do
+      crontab = [{"0 * * * *", MyApp.WorkerA}]
+
+      start_supervised_cronitor(%{conf: %{conf | plugins: [{Oban.Cron, crontab: crontab}]}})
+
+      :ok = Notifier.listen(conf, :cronitor)
+      :ok = GenServer.call(@name, :share)
+
+      assert_receive {:notification, :cronitor, payload}
+      assert %{"crontab" => [["0 * * * *", "MyApp.WorkerA", %{}]]} = payload
+    end
   end
 
   describe "fetching merged crontabs" do
