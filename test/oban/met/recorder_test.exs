@@ -2,6 +2,8 @@ defmodule Oban.Met.RecorderTest do
   use Oban.Met.Case, async: true
   use ExUnitProperties
 
+  import ExUnit.CaptureLog
+
   alias Oban.Met.Recorder
   alias Oban.Met.Values.{Gauge, Sketch}
   alias Oban.Notifier
@@ -356,6 +358,26 @@ defmodule Oban.Met.RecorderTest do
       end)
 
       assert %{"all" => 4} = latest(:a, lookback: 6)
+    end
+  end
+
+  describe "task isolation" do
+    setup :start_supervised_oban
+
+    test "retiring in-flight compaction when the recorder shuts down", %{conf: conf} do
+      # Enough periods that compaction can't finish within the recorder's shutdown.
+      periods = List.duplicate({1, 120}, 5_000)
+
+      pid = start_supervised!({Recorder, conf: conf, name: @name, compact_periods: periods})
+
+      log =
+        capture_log(fn ->
+          send(pid, :compact)
+
+          stop_supervised(@name)
+        end)
+
+      refute log =~ "ArgumentError"
     end
   end
 

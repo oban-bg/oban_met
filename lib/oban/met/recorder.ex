@@ -284,13 +284,15 @@ defmodule Oban.Met.Recorder do
     if state.handoff == :awaiting and not Peer.leader?(state.conf) do
       %{series_table: series_table, latest_table: latest_table} = state
 
-      Task.start_link(fn ->
-        data
-        |> Base.decode64!()
-        |> :erlang.binary_to_term()
-        |> then(&:ets.insert(series_table, &1))
+      Task.start(fn ->
+        until_deleted(series_table, fn ->
+          data
+          |> Base.decode64!()
+          |> :erlang.binary_to_term()
+          |> then(&:ets.insert(series_table, &1))
 
-        rebuild_latest(series_table, latest_table)
+          rebuild_latest(series_table, latest_table)
+        end)
       end)
     end
 
@@ -341,7 +343,9 @@ defmodule Oban.Met.Recorder do
     # Window shifted back 2s so concurrent writes (at time=now) can't race the delete.
     {:ok, pid} =
       Task.start(fn ->
-        inner_compact(series_table, latest_table, periods, System.system_time(:second) - 2)
+        until_deleted(series_table, fn ->
+          inner_compact(series_table, latest_table, periods, System.system_time(:second) - 2)
+        end)
       end)
 
     state = Map.put(state, :compact_task, {pid, Process.monitor(pid)})
@@ -472,9 +476,11 @@ defmodule Oban.Met.Recorder do
   defp run_transfer(transfer) do
     match = {{:_, :_, :_}, :_, :_, :_}
 
-    transfer.table
-    |> :ets.select([{match, [], [:"$_"]}], transfer.size)
-    |> send_chunks(transfer, 0)
+    until_deleted(transfer.table, fn ->
+      transfer.table
+      |> :ets.select([{match, [], [:"$_"]}], transfer.size)
+      |> send_chunks(transfer, 0)
+    end)
   end
 
   # A trailing empty chunk terminates the transfer because a continuation can't report that the
@@ -548,6 +554,18 @@ defmodule Oban.Met.Recorder do
       _ ->
         raise RuntimeError, "no table registered for #{inspect(name)}"
     end
+  end
+
+  defp until_deleted(table, fun) do
+    fun.()
+  rescue
+    error in ArgumentError ->
+      # A table deleted mid-scan means the recorder shut down beneath a detached task
+      if :ets.info(table, :size) == :undefined do
+        :ok
+      else
+        reraise(error, __STACKTRACE__)
+      end
   end
 
   defp inner_compact(series_table, latest_table, periods, now) do
