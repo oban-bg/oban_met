@@ -1,5 +1,27 @@
 # Changelog for Oban Met v1.3
 
+## v1.3.2 — 2026-10-06
+
+### Bug Fixes
+
+- [Reporter] Recognize `Oban.Pro.Engine` for queue discovery
+
+  Pro v1.8 renamed the `Smart` engine to `Oban.Pro.Engine`. The reporter only checked for the
+  legacy `Oban.Pro.Engines.Smart` name, so with the new name it fell back to running a `SELECT
+  DISTINCT queue` over `oban_jobs` instead of reading `oban_producers`. Both names are now
+  recognized.
+
+- [Recorder] Prevent recorder tasks from shutdown crashing
+
+  Compaction and handoff tasks run detached from the Recorder that owns their ETS tables. When the
+  Recorder terminated during an orderly shutdown the tables were destroyed while a task was still
+  scanning, and the next ETS call raised with "invalid continuation" or a missing table
+  identifier.
+
+  Tasks now treat a deleted source table as a normal end to the pass, while real errors still
+  crash the task as before. Handoff payload inserts are also detached so a malformed payload from
+  a peer can't terminate the Recorder and destroy its metrics history.
+
 ## v1.3.1 — 2026-08-26
 
 ### Enhancements
