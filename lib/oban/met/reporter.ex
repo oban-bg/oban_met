@@ -15,9 +15,10 @@ defmodule Oban.Met.Reporter do
   alias Oban.{Job, Notifier, Peer, Repo}
   alias Oban.Met.Migration
   alias Oban.Met.Values.Gauge
-  alias Oban.Pro.Engines.Smart
 
   require Logger
+
+  @pro_engines [Oban.Pro.Engine, Oban.Pro.Engines.Smart]
 
   @empty_states %{
     "available" => [],
@@ -154,7 +155,7 @@ defmodule Oban.Met.Reporter do
 
   defp cache_queues(state) do
     if Integer.mod(state.check_counter, 60) == 0 do
-      source = if state.conf.engine == Smart, do: "oban_producers", else: "oban_jobs"
+      source = if state.conf.engine in @pro_engines, do: "oban_producers", else: "oban_jobs"
       query = from(p in source, select: p.queue, distinct: true)
 
       %{state | queues: Repo.all(state.conf, query)}
