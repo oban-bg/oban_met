@@ -1,5 +1,68 @@
 # Changelog for Oban Met v1.3
 
+## v1.3.3 — 2026-10-20
+
+### Bug Fixes
+
+- [Listener] Fix exec_count max and pct within single interval
+
+  Execution counts were reported with one entry per execution rather than a single total, so
+  `timeslice/3` with `:max` or `{:pct, ntile}` reported 1 for any busy second.
+
+- [Met] Fix default instance dispatch met functions
+
+  Calling `labels/2`, `latest/2`, or `timeslice/2` with opts, but no instance name, used the series
+  as the instance name and crashed. Two-argument calls with a keyword list now use the default
+  `Oban` instance, matching the documented examples.
+
+- [Recorder] Fix crashing and unmatched filters
+
+  Filtering with an empty list of values, such as `filters: [queue: []]`, raised an
+  `Enum.EmptyError`. Empty value lists now match nothing.
+
+  Filter values given as atoms, such as `filters: [queue: :default]`, never matched because labels
+  are stored as strings. Values are now converted to strings before comparison.
+
+- [Recorder] Accept atoms for latest and timeslice groups
+
+  Grouping by an atom label, such as `group: :queue`, silently combined all values under a single
+  group. Atom groups are now treated like their string equivalents.
+
+- [Recorder] Fix timeslice at the edges of the lookback window
+
+  The lookback window was measured from the current time rather than `since`, so a past `since`
+  dropped data from the oldest bucket and a future `since` returned an extra bucket beyond the
+  window. The window now covers the `lookback` seconds before `since`.
+
+- [Reporter] Prevent database errors from crashing the reporter
+
+  A database error while counting jobs crashed the reporter on every check, which brought down the
+  Met supervisor after a few seconds of database unavailability.
+
+  Counting now retries through `Oban.Repo.transaction/3` and skips the check once retries are
+  exhausted. Requires Oban v2.23+.
+
+- [Value] Approximate sums for sketch values
+
+  Summing a sketch always returned `0.0`, so `timeslice/3` with the default `:sum` operation and
+  `latest/3` reported zero for `exec_time` and `wait_time`. Sketch sums are now estimated from their
+  bins, with the same 2% error as quantiles.
+
+- [Value] Fix inflated max and pct for compacted gauges
+
+  Grouping compacted gauges collapsed each interval into a single total, so `timeslice/3` with
+  `:max` or `{:pct, ntile}` reported the interval's total rather than its peak once data was older
+  than the first compaction period. Gauges are now combined position by position, preserving both
+  the per-second peak and the total.
+
+- [Value] Correct gauge and sketch edge cases and specs
+
+  Gauges now accept zero in `Gauge.new/1` and support `Gauge.add/2` on an empty gauge, matching
+  their documented types. The default gauge struct holds an empty list rather than an integer.
+
+  Specs for `Gauge.quantile/2`, `Sketch.to_list/1`, and sketch bins also reflect the values they
+  actually return.
+
 ## v1.3.2 — 2026-10-06
 
 ### Bug Fixes
