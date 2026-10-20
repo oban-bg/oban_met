@@ -116,6 +116,21 @@ defmodule Oban.Met.RecorderTest do
       assert %{"all" => 4} == latest(:a, filters: [node: ["web.1"], queue: ["alpha"]])
       assert %{} == latest(:a, filters: [node: ["web.1"], queue: ["gamma"]])
     end
+
+    test "filtering the latest values by atom labels" do
+      store(:a, 4, %{"node" => "web.1", "queue" => "alpha"})
+      store(:a, 3, %{"node" => "web.2", "queue" => "gamma"})
+
+      assert %{"all" => 4} == latest(:a, filters: [queue: :alpha])
+      assert %{"all" => 7} == latest(:a, filters: [queue: [:alpha, "gamma"]])
+    end
+
+    test "filtering the latest values by an empty list matches nothing" do
+      store(:a, 4, %{"node" => "web.1", "queue" => "alpha"})
+
+      assert %{} == latest(:a, filters: [queue: []])
+      assert %{} == latest(:a, filters: [node: "web.1", queue: []])
+    end
   end
 
   describe "timeslice/3" do
@@ -195,6 +210,16 @@ defmodule Oban.Met.RecorderTest do
 
       assert [20, 4] = values_for.(slices, "alpha")
       assert [10, 2] = values_for.(slices, "gamma")
+    end
+
+    test "filtering slices by labels" do
+      store(:a, 4, %{"queue" => "alpha"}, time: ts(-1))
+      store(:a, 3, %{"queue" => "gamma"}, time: ts(-1))
+
+      assert [4] = timeslice_values(:a, filters: [queue: "alpha"])
+      assert [4] = timeslice_values(:a, filters: [queue: :alpha])
+      assert [7] = timeslice_values(:a, filters: [queue: ["alpha", :gamma]])
+      assert [] = timeslice_values(:a, filters: [queue: []])
     end
 
     test "merging sketch data across labels for the same timestamp" do

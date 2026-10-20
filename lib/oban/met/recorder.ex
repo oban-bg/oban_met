@@ -768,8 +768,8 @@ defmodule Oban.Met.Recorder do
       and_guard =
         values
         |> List.wrap()
-        |> Enum.map(fn value -> {:==, {:map_get, to_string(field), :"$1"}, value} end)
-        |> Enum.reduce(fn or_guard, or_acc -> {:orelse, or_guard, or_acc} end)
+        |> Enum.map(fn value -> {:==, {:map_get, to_string(field), :"$1"}, to_string(value)} end)
+        |> Enum.reduce(false, fn or_guard, or_acc -> {:orelse, or_guard, or_acc} end)
 
       {:andalso, and_guard, and_acc}
     end)

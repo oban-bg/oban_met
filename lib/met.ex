@@ -19,7 +19,7 @@ defmodule Oban.Met do
   @type label :: String.t()
   @type ts :: integer()
 
-  @type filter_value :: label() | [label()]
+  @type filter_value :: label() | atom() | [label() | atom()]
 
   @type series_detail :: %{series: series(), labels: [label()], value: module()}
 
