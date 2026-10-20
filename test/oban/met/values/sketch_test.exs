@@ -16,6 +16,15 @@ defmodule Oban.Met.Values.SketchTest do
     end
   end
 
+  property "sums are within the relative error of the actual sum" do
+    check all values <- list_of(positive_integer(), min_length: 1) do
+      actual = Enum.sum(values)
+      approx = values |> Sketch.new() |> Sketch.sum()
+
+      assert abs(approx - actual) <= actual * 0.02 + 1.0e-9
+    end
+  end
+
   property "encoded and decoded sketches retain the same values" do
     check all values <- list_of(positive_integer(), min_length: 1) do
       sketch = Sketch.new(values)

@@ -258,6 +258,7 @@ defmodule Oban.Met.RecorderTest do
       store(:a, Sketch.new([3]), %{"queue" => "alpha", "node" => "b"}, time: ts(-1))
 
       assert [3, 3] = timeslice_values(:a, operation: {:pct, 1.0})
+      assert [4, 4] = timeslice_values(:a, operation: :sum)
     end
 
     test "selecting metrics across internal chunks" do

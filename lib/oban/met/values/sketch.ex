@@ -122,19 +122,28 @@ defmodule Oban.Met.Values.Sketch do
         end
       end)
 
-    2 * :math.pow(@gamma, index) / (@gamma + 1)
+    bin_value(index)
   end
 
   @doc """
-  Compute the sum for a sketch. Hardcoded to 0.
+  Compute the approximate sum of all values in a sketch.
+
+  Each value is estimated from its bin, so the sum carries the same relative error as quantiles.
 
   ## Examples
 
-      iex> Sketch.sum(Sketch.new([1, 2, 3, 3]))
+      iex> Sketch.sum(Sketch.new())
       0.0
+
+      iex> Sketch.new([1, 2, 3, 3])
+      ...> |> Sketch.sum()
+      ...> |> round()
+      9
   """
   @spec sum(t()) :: float()
-  def sum(%Sketch{data: _data}), do: 0.0
+  def sum(%Sketch{data: data}) do
+    Enum.reduce(data, 0.0, fn {key, val}, acc -> acc + bin_value(key) * val end)
+  end
 
   @doc """
   Union two sketches into a single value. This is an alias for `merge/2`.
@@ -157,7 +166,7 @@ defmodule Oban.Met.Values.Sketch do
   """
   @spec to_list(t()) :: [float()]
   def to_list(%Sketch{data: data}) do
-    for {key, val} <- data, do: {2 * :math.pow(@gamma, key) / (@gamma + 1), val}
+    for {key, val} <- data, do: {bin_value(key), val}
   end
 
   @doc false
@@ -183,4 +192,6 @@ defmodule Oban.Met.Values.Sketch do
 
     %Sketch{data: data, size: size}
   end
+
+  defp bin_value(key), do: 2 * :math.pow(@gamma, key) / (@gamma + 1)
 end
