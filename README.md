@@ -54,7 +54,8 @@ Met powers the charts and runtime details shown in the [Oban Web][web] dashboard
   without pre-computed histogram buckets.
 
 - **🤝 Handoff** - Ephemeral data storage via data replication with handoff between nodes. All nodes have a
-  shared view of the cluster's data and new nodes are caught up when they come online.
+  shared view of the cluster's data and, with the `Oban.Notifiers.PG` notifier, new nodes are
+  caught up when they come online.
 
 ## Installation
 
@@ -65,13 +66,40 @@ To receive metrics from non-web nodes in a system with separate "web" and "worke
 you must explicitly include `oban_met` as a dependency for "workers".
 
 ```elixir
-{:oban_met, "~> 1.0"}
+{:oban_met, "~> 1.3"}
 ```
+
+Met requires Oban v2.23 or later.
 
 ## Usage
 
 No configuration is necessary and Oban Met will start automatically in a typical application. A
 variety of options are provided for more complex or nuanced usage.
+
+### Querying Metrics
+
+Met records four series, each labeled by `node`, `queue`, and `state`, and the job series also by
+`worker`:
+
+* `exec_count` - a gauge of jobs that finished executing each second, labeled by their state after
+  execution, e.g. `completed` or `retryable`
+* `exec_time` - a sketch of job execution times
+* `wait_time` - a sketch of how long jobs waited in the queue before executing
+* `full_count` - a gauge of jobs in the database, counted periodically by the leader node
+
+Use `Oban.Met.latest/3` for current values and `Oban.Met.timeslice/3` for history, filtered and
+grouped by any label:
+
+```elixir
+Oban.Met.latest(:full_count, group: "state")
+%{"available" => 9, "completed" => 80, "executing" => 5}
+
+Oban.Met.timeslice(:exec_time, by: 5, group: "queue", operation: {:pct, 0.95})
+[{11, 9970235387.03, "analysis"}, ..., {0, 1520977874.33, "events"}]
+```
+
+Producer checks from every node are available through `Oban.Met.checks/1`, and the merged crontab
+from every node through `Oban.Met.crontab/1`.
 
 ### Configuration
 
@@ -123,11 +151,10 @@ config :oban_met, auto_testing_modes: [:disabled, :manual]
 
 ### Customizing Estimates
 
-Options for internal `Oban.Met` processes can be overridden from the plugin specification. Most
-options are internal and not meant to be overridden, but one particularly useful option to tune is
-the `estimate_limit`. The `estimate_limit` determines at which point state/queue counts switch
-from using an accurate `count(*)` call to a much more efficient, but less accurate, estimate
-function.
+The `estimate_limit` determines when counts switch from an accurate `count(*)` query to a much more
+efficient, but less accurate, estimate function. The limit applies to each state's total across all
+queues: once a state reaches the limit, its count for every queue is estimated on the following
+checks. Estimates are only available on Postgres, and other databases always use exact counts.
 
 The default limit is a conservative 50k, which may be too low for systems with insert spikes. This
 declares an override to set the limit to 200k:
@@ -146,11 +173,15 @@ counts aren't critical, or to reduce database load, you can increase the interva
 {Oban.Met, reporter: [check_interval: :timer.seconds(5)]}
 ```
 
+The list of queues used for estimates is refreshed every 60 checks, so newly added queues may take
+longer to appear in estimated counts with a longer interval.
+
 ### Explicit Migrations
 
 Met will create the necessary estimate function automatically when possible. The migration isn't
 necessary under normal circumstances, but is provided to avoid permission issues or allow full
-control over database changes.
+control over database changes. If the database role Met connects with can't create or replace the
+function, counts fail on every check and the error is logged until the migration is used instead.
 
 ```bash
 mix ecto.gen.migration add_oban_met
@@ -168,11 +199,13 @@ defmodule MyApp.Repo.Migrations.AddObanMet do
 end
 ```
 
-Then, after disabling auto-start, configure the reporter not to auto-migrate if you run the
-explicit migration:
+Pass a `:prefix` to both functions, e.g. `Oban.Met.Migration.up(prefix: "private")`, when Oban
+runs in an alternate prefix.
+
+Then configure the reporter not to auto-migrate:
 
 ```elixir
-{Oban.Met, reporter: [auto_migrate: false]}
+config :oban_met, reporter: [auto_migrate: false]
 ```
 
 ### Customizing the Estimate Function
@@ -190,7 +223,8 @@ create a `<prefix>.oban_count_estimate(state text, queue text)` function returni
 
 Recorded metrics are periodically compacted into coarser windows to bound memory use. Each period
 is a `{step, duration}` tuple in seconds, where `step` is the resolution and `duration` is how long
-values are retained at that resolution. The defaults keep roughly two hours of history:
+values are retained at that resolution, after the periods before it. The defaults keep about three
+and a half hours of history:
 
 ```elixir
 {Oban.Met, recorder: [compact_periods: [{1, 120}, {5, 900}, {30, 2_000}, {60, 9_300}]]}
@@ -214,7 +248,8 @@ store timing in milliseconds:
 config :oban_met, sketch_time_unit: :millisecond
 ```
 
-This is a compile-time option that affects how timing values are binned in sketches.
+This is a compile-time option that affects how timing values are binned in sketches, so changing it
+requires recompiling Met, e.g. `mix deps.compile oban_met --force`.
 
 > #### Cluster Consistency {: .warning}
 >
@@ -222,7 +257,7 @@ This is a compile-time option that affects how timing values are binned in sketc
 > nodes will produce incorrect aggregated metrics.
 >
 > After changing this setting, existing metrics will be invalid until compaction ages them out
-> (approximately 2 hours with default compaction periods).
+> (about three and a half hours with default compaction periods).
 
 <!-- MDOC -->
 
@@ -235,6 +270,8 @@ databases and run necessary migrations:
 mix test.setup
 ```
 
+Use `mix test.reset` to drop, recreate, and migrate the test databases.
+
 ## Community
 
 There are a few places to connect and communicate with other Oban users:
@@ -245,4 +282,4 @@ There are a few places to connect and communicate with other Oban users:
 
 [invite]: https://elixir-slack.community/
 [forum]: https://elixirforum.com/
-[issues]: https://github.com/sorentwo/oban/issues
+[issues]: https://github.com/oban-bg/oban/issues
