@@ -25,6 +25,8 @@ defmodule Oban.Met do
 
   @type operation :: :max | :sum | {:pct, float()}
 
+  @type labels_opts :: [lookback: pos_integer(), since: pos_integer()]
+
   @type latest_opts :: [
           filters: keyword(filter_value()),
           group: nil | label(),
@@ -150,6 +152,9 @@ defmodule Oban.Met do
     |> Cronitor.merged_crontab()
   end
 
+  @doc false
+  def labels(label, opts) when is_list(opts), do: labels(Oban, label, opts)
+
   @doc """
   Get all stored, unique values for a particular label.
 
@@ -165,8 +170,10 @@ defmodule Oban.Met do
       Oban.Met.labels("worker")
       ~w(MyApp.Worker MyApp.OtherWorker)
   """
-  @spec labels(Oban.name(), label(), keyword()) :: [label()]
-  def labels(oban \\ Oban, label, opts \\ []) do
+  @spec labels(Oban.name(), label(), labels_opts()) :: [label()]
+  def labels(oban \\ Oban, label, opts \\ [])
+
+  def labels(oban, label, opts) do
     oban
     |> Registry.via(Recorder)
     |> Recorder.labels(to_string(label), opts)
@@ -181,6 +188,9 @@ defmodule Oban.Met do
     |> Registry.via(Recorder)
     |> Recorder.lookup(to_string(series))
   end
+
+  @doc false
+  def latest(series, opts) when is_list(opts), do: latest(Oban, series, opts)
 
   @doc """
   Get the latest values for a gauge series, optionally subdivided by a label.
@@ -229,8 +239,10 @@ defmodule Oban.Met do
 
       Oban.Met.latest(:exec_count, filters: [node: "worker.1", "worker.2"])
   """
-  @spec latest(Oban.name(), series()) :: counts() | sub_counts()
-  def latest(oban \\ Oban, series, opts \\ []) do
+  @spec latest(Oban.name(), series(), latest_opts()) :: counts() | sub_counts()
+  def latest(oban \\ Oban, series, opts \\ [])
+
+  def latest(oban, series, opts) do
     oban
     |> Registry.via(Recorder)
     |> Recorder.latest(to_string(series), opts)
@@ -255,6 +267,9 @@ defmodule Oban.Met do
     |> Registry.via(Recorder)
     |> Recorder.series()
   end
+
+  @doc false
+  def timeslice(series, opts) when is_list(opts), do: timeslice(Oban, series, opts)
 
   @doc """
   Summarize a series of data with an aggregate over a configurable window of time.
@@ -283,7 +298,9 @@ defmodule Oban.Met do
         ...
   """
   @spec timeslice(Oban.name(), series(), timeslice_opts()) :: [{ts(), value(), label()}]
-  def timeslice(oban \\ Oban, series, opts \\ []) do
+  def timeslice(oban \\ Oban, series, opts \\ [])
+
+  def timeslice(oban, series, opts) do
     oban
     |> Registry.via(Recorder)
     |> Recorder.timeslice(to_string(series), opts)
