@@ -160,10 +160,10 @@ defmodule Oban.Met.RecorderTest do
       store(:a, 4, %{"queue" => "alpha"}, time: ts(-1))
       store(:a, 4, %{"queue" => "gamma"}, time: ts(-1))
       store(:a, 2, %{"queue" => "gamma"}, time: ts(-1))
-      store(:a, 2, %{"queue" => "alpha"}, time: ts(-0))
-      store(:a, 2, %{"queue" => "alpha"}, time: ts(-0))
-      store(:a, 2, %{"queue" => "gamma"}, time: ts(-0))
-      store(:a, 1, %{"queue" => "gamma"}, time: ts(-0))
+      store(:a, 2, %{"queue" => "alpha"}, time: ts(-2))
+      store(:a, 2, %{"queue" => "alpha"}, time: ts(-2))
+      store(:a, 2, %{"queue" => "gamma"}, time: ts(-2))
+      store(:a, 1, %{"queue" => "gamma"}, time: ts(-2))
 
       values_for = fn slices, group ->
         slices
@@ -210,6 +210,35 @@ defmodule Oban.Met.RecorderTest do
 
       assert [20, 4] = values_for.(slices, "alpha")
       assert [10, 2] = values_for.(slices, "gamma")
+    end
+
+    test "slicing values at or after since into negative chunks" do
+      since = ts(-10)
+
+      store(:a, 1, %{"queue" => "alpha"}, time: since - 1)
+      store(:a, 2, %{"queue" => "alpha"}, time: since)
+      store(:a, 3, %{"queue" => "alpha"}, time: since + 1)
+
+      assert [{0, 1, nil}, {-1, 5, nil}] = timeslice(:a, by: 2, since: since, lookback: 2)
+    end
+
+    test "slicing within the lookback before since" do
+      since = ts(-10)
+
+      store(:a, 1, %{"queue" => "alpha"}, time: since - 7)
+      store(:a, 2, %{"queue" => "alpha"}, time: since - 6)
+      store(:a, 3, %{"queue" => "alpha"}, time: since - 1)
+
+      assert [{2, 2, nil}, {0, 3, nil}] = timeslice(:a, by: 2, since: since, lookback: 6)
+    end
+
+    test "slicing within the lookback before a future since" do
+      since = ts(4)
+
+      store(:a, 1, %{"queue" => "alpha"}, time: since - 7)
+      store(:a, 2, %{"queue" => "alpha"}, time: since - 6)
+
+      assert [{2, 2, nil}] = timeslice(:a, by: 2, since: since, lookback: 6)
     end
 
     test "filtering slices by labels" do

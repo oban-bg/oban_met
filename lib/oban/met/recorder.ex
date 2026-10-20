@@ -141,7 +141,7 @@ defmodule Oban.Met.Recorder do
 
     name
     |> series_table()
-    |> select(series, lookback, opts[:filters])
+    |> select(series, since - lookback, opts[:filters])
     |> Enum.reduce(%{}, &merge_group(&1, &2, group))
     |> Enum.reduce(%{}, &merge_chunk(&1, &2, since, by))
     |> Enum.sort_by(fn {{label, chunk}, _} -> {label, -chunk} end)
@@ -162,7 +162,7 @@ defmodule Oban.Met.Recorder do
   end
 
   defp merge_chunk({{label, ts}, value}, acc, since, by) do
-    chunk = div(since - ts - 1, by)
+    chunk = Integer.floor_div(since - ts - 1, by)
 
     Map.update(acc, {label, chunk}, value, &Value.merge(&1, value))
   end
@@ -729,8 +729,7 @@ defmodule Oban.Met.Recorder do
 
   # Fetching & Filtering
 
-  defp select(table, series, since, filters) do
-    cutoff = System.system_time(:second) - since
+  defp select(table, series, cutoff, filters) do
     match = {{to_string(series), :_, :_}, :_, :"$1", :_}
 
     conditions =
