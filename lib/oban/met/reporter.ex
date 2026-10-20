@@ -92,33 +92,9 @@ defmodule Oban.Met.Reporter do
 
   @impl GenServer
   def handle_info(:checkpoint, %State{conf: conf} = state) do
-    if Peer.leader?(conf.name) do
-      state =
-        state
-        |> create_estimate_function()
-        |> cache_queues()
+    state = if Peer.leader?(conf.name), do: checkpoint(state), else: state
 
-      {:ok, checks} = checks(state)
-
-      metrics =
-        for {_key, counts} <- checks,
-            count <- counts,
-            do: Map.update!(count, :value, &Gauge.new/1)
-
-      payload = %{
-        metrics: metrics,
-        name: inspect(conf.name),
-        node: conf.node,
-        time: System.system_time(:second)
-      }
-
-      Notifier.notify(conf, :metrics, payload)
-
-      {:noreply,
-       schedule_checks(%{state | check_counter: state.check_counter + 1, checks: checks})}
-    else
-      {:noreply, schedule_checks(state)}
-    end
+    {:noreply, schedule_checks(state)}
   end
 
   def handle_info(message, state) do
@@ -140,6 +116,39 @@ defmodule Oban.Met.Reporter do
   end
 
   # Checking
+
+  defp checkpoint(%State{conf: conf} = state) do
+    fun = fn ->
+      state =
+        state
+        |> create_estimate_function()
+        |> cache_queues()
+
+      %{state | checks: checks(state)}
+    end
+
+    case Repo.transaction(conf, fun, on_exhausted: :log) do
+      {:ok, state} ->
+        metrics =
+          for {_key, counts} <- state.checks,
+              count <- counts,
+              do: Map.update!(count, :value, &Gauge.new/1)
+
+        payload = %{
+          metrics: metrics,
+          name: inspect(conf.name),
+          node: conf.node,
+          time: System.system_time(:second)
+        }
+
+        Notifier.notify(conf, :metrics, payload)
+
+        %{state | check_counter: state.check_counter + 1}
+
+      {:error, _reason} ->
+        state
+    end
+  end
 
   defp create_estimate_function(%{auto_migrate: true, function_created?: false} = state) do
     %{conf: %{prefix: prefix}} = state
@@ -180,15 +189,13 @@ defmodule Oban.Met.Reporter do
     count_query = count_query(count_states)
     guess_query = guess_query(guess_states, state.queues, state.conf)
 
-    Repo.transaction(state.conf, fn ->
-      count_counts = Repo.all(state.conf, count_query)
-      guess_counts = Repo.all(state.conf, guess_query)
+    count_counts = Repo.all(state.conf, count_query)
+    guess_counts = Repo.all(state.conf, guess_query)
 
-      (count_counts ++ guess_counts)
-      |> Enum.group_by(& &1.state)
-      |> Enum.reduce(@empty_states, fn {state, counts}, acc ->
-        Map.put(acc, state, counts)
-      end)
+    (count_counts ++ guess_counts)
+    |> Enum.group_by(& &1.state)
+    |> Enum.reduce(@empty_states, fn {state, counts}, acc ->
+      Map.put(acc, state, counts)
     end)
   end
 
