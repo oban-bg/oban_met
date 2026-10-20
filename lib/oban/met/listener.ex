@@ -90,7 +90,7 @@ defmodule Oban.Met.Listener do
     objects
     |> Enum.group_by(&elem(&1, 0), &elem(&1, 2))
     |> Enum.map(fn {{series, state, queue, worker}, values} ->
-      value = if series == :exec_count, do: Gauge.new(values), else: Sketch.new(values)
+      value = if series == :exec_count, do: Gauge.new(Enum.sum(values)), else: Sketch.new(values)
 
       %{series: series, state: state, queue: queue, worker: worker, value: value}
     end)

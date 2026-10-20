@@ -33,6 +33,25 @@ defmodule Oban.Met.ListenerTest do
       assert ~w(A B C) = utake(metrics, "worker")
     end
 
+    test "reporting execution counts as a single value per interval", %{conf: conf} do
+      pid = start_supervised!({Listener, conf: conf, name: @name})
+
+      for _ <- 1..3 do
+        meta = %{conf: conf, job: %{queue: "alpha", worker: "A"}, state: :success}
+
+        :telemetry.execute([:oban, :job, :stop], %{duration: 100_000, queue_time: 10_000}, meta)
+      end
+
+      :ok = Notifier.listen(conf.name, [:metrics])
+      :ok = Listener.report(pid)
+
+      assert_receive {:notification, :metrics, %{"metrics" => metrics}}
+
+      counts = for %{"series" => "exec_count", "value" => value} <- metrics, do: value
+
+      assert [%{"data" => [3]}] = counts
+    end
+
     test "durations are always converted to positive values", %{conf: conf} do
       pid = start_supervised!({Listener, conf: conf, name: @name})
 
