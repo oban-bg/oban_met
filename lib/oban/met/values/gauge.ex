@@ -103,25 +103,25 @@ defmodule Oban.Met.Values.Gauge do
   def sum(%Gauge{data: data}), do: Enum.sum(data)
 
   @doc """
-  Union two gauges into a single value.
+  Union two gauges by summing their values pairwise.
 
   ## Examples
 
-  Merging two gauge results in a single value:
+  Union of single value gauges results in a single value:
+
+      iex> Gauge.union(Gauge.new(1), Gauge.new(2)).data
+      [3]
+
+  Union of multi-value gauges retains each position:
 
       iex> gauge_1 = Gauge.new([1, 2])
-      ...> gauge_2 = Gauge.new([2, 3])
+      ...> gauge_2 = Gauge.new([2, 3, 4])
       ...> Gauge.union(gauge_1, gauge_2).data
-      [8]
+      [3, 5, 4]
   """
   @spec union(t(), t()) :: t()
   def union(%Gauge{data: data_1}, %Gauge{data: data_2}) do
-    data =
-      (data_1 ++ data_2)
-      |> Enum.sum()
-      |> List.wrap()
-
-    %Gauge{data: data}
+    %Gauge{data: zip_sum(data_1, data_2)}
   end
 
   @doc """
@@ -138,4 +138,11 @@ defmodule Oban.Met.Values.Gauge do
   """
   @spec from_map(%{optional(String.t()) => term()}) :: t()
   def from_map(%{"data" => data}), do: %Gauge{data: data}
+
+  defp zip_sum([head_1 | tail_1], [head_2 | tail_2]) do
+    [head_1 + head_2 | zip_sum(tail_1, tail_2)]
+  end
+
+  defp zip_sum(rest, []), do: rest
+  defp zip_sum([], rest), do: rest
 end

@@ -299,6 +299,17 @@ defmodule Oban.Met.RecorderTest do
       end
     end
 
+    test "compacted gauges retain their per-second maximum across labels" do
+      for queue <- ["alpha", "gamma"], offset <- 1..5 do
+        store(:a, 1, %{"queue" => queue}, time: ts(-offset))
+      end
+
+      compact([{5, 60}])
+
+      assert [2] = timeslice_values(:a, by: 5, lookback: 10, operation: :max)
+      assert [10] = timeslice_values(:a, by: 5, lookback: 10, operation: :sum)
+    end
+
     test "compacted intervals contain a range from min to max time" do
       for offset <- 1..30 do
         store(:a, 1, %{queue: :alpha}, time: ts(-offset))
