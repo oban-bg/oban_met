@@ -103,6 +103,7 @@ defmodule Oban.Met.RecorderTest do
 
       assert %{"alpha" => 8, "gamma" => 6} = latest(:a, group: "queue")
       assert %{"web.1" => 7, "web.2" => 7} = latest(:a, group: "node")
+      assert %{"web.1" => 7, "web.2" => 7} = latest(:a, group: :node)
     end
 
     test "filtering the latest values by a label" do
@@ -210,6 +211,8 @@ defmodule Oban.Met.RecorderTest do
 
       assert [20, 4] = values_for.(slices, "alpha")
       assert [10, 2] = values_for.(slices, "gamma")
+
+      assert slices == timeslice(:a, group: :queue, by: 3)
     end
 
     test "slicing values at or after since into negative chunks" do

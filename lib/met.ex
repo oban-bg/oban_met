@@ -29,14 +29,14 @@ defmodule Oban.Met do
 
   @type latest_opts :: [
           filters: keyword(filter_value()),
-          group: nil | label(),
+          group: nil | label() | atom(),
           lookback: pos_integer()
         ]
 
   @type timeslice_opts :: [
           by: pos_integer(),
           filters: keyword(filter_value()),
-          group: nil | label(),
+          group: nil | label() | atom(),
           lookback: pos_integer(),
           operation: operation(),
           since: pos_integer()

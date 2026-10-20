@@ -91,7 +91,7 @@ defmodule Oban.Met.Recorder do
   def latest(name, series, opts \\ []) do
     opts = Keyword.validate!(opts, @default_latest_opts)
 
-    group = Keyword.fetch!(opts, :group)
+    group = opts |> Keyword.fetch!(:group) |> to_group()
     lookback = Keyword.fetch!(opts, :lookback)
     filters = Keyword.fetch!(opts, :filters)
 
@@ -135,7 +135,7 @@ defmodule Oban.Met.Recorder do
     opts = Keyword.validate!(opts, [:since] ++ @default_timeslice_opts)
 
     by = Keyword.fetch!(opts, :by)
-    group = Keyword.fetch!(opts, :group)
+    group = opts |> Keyword.fetch!(:group) |> to_group()
     lookback = Keyword.fetch!(opts, :lookback)
     operation = Keyword.fetch!(opts, :operation)
     since = Keyword.get(opts, :since, System.system_time(:second))
@@ -760,6 +760,9 @@ defmodule Oban.Met.Recorder do
   end
 
   defp take_recent(_, _cutoff, acc), do: {:halt, acc}
+
+  defp to_group(nil), do: nil
+  defp to_group(group), do: to_string(group)
 
   defp filters_to_guards(nil, base), do: base
 
