@@ -9,7 +9,7 @@ defmodule Oban.Met.Values.Sketch do
   alias __MODULE__, as: Sketch
 
   @type t :: %__MODULE__{
-          data: %{optional(pos_integer()) => pos_integer()},
+          data: %{optional(non_neg_integer()) => pos_integer()},
           size: non_neg_integer()
         }
 
@@ -23,7 +23,7 @@ defmodule Oban.Met.Values.Sketch do
   @inv_log_gamma 1.0 / :math.log(@gamma)
 
   @doc """
-  Create a new sketch instance with an optional error rate.
+  Create a new sketch instance, optionally with initial values.
 
   ## Examples
 
@@ -164,7 +164,7 @@ defmodule Oban.Met.Values.Sketch do
       ...> |> length()
       3
   """
-  @spec to_list(t()) :: [float()]
+  @spec to_list(t()) :: [{float(), pos_integer()}]
   def to_list(%Sketch{data: data}) do
     for {key, val} <- data, do: {bin_value(key), val}
   end

@@ -8,7 +8,7 @@ defmodule Oban.Met.Values.Gauge do
   @encoder if Code.ensure_loaded?(JSON.Encoder), do: JSON.Encoder, else: Jason.Encoder
 
   @derive @encoder
-  defstruct data: 0
+  defstruct data: []
 
   @type t :: %__MODULE__{data: [non_neg_integer()]}
 
@@ -20,11 +20,14 @@ defmodule Oban.Met.Values.Gauge do
       iex> Gauge.new(1).data
       [1]
 
+      iex> Gauge.new(0).data
+      [0]
+
       iex> Gauge.new([1, 2]).data
       [1, 2]
   """
   @spec new(non_neg_integer() | [non_neg_integer()]) :: t()
-  def new(data) when is_integer(data) and data > 0 do
+  def new(data) when is_integer(data) and data >= 0 do
     %Gauge{data: [data]}
   end
 
@@ -43,8 +46,17 @@ defmodule Oban.Met.Values.Gauge do
       ...> |> Gauge.add(1)
       ...> |> Map.fetch!(:data)
       [3]
+
+  Adding to an empty gauge starts a new value:
+
+      iex> Gauge.add(%Gauge{}, 2).data
+      [2]
   """
   @spec add(t(), pos_integer()) :: t()
+  def add(%Gauge{data: []}, value) when value > 0 do
+    %Gauge{data: [value]}
+  end
+
   def add(%Gauge{data: [head | tail]}, value) when value > 0 do
     %Gauge{data: [head + value | tail]}
   end
@@ -78,8 +90,13 @@ defmodule Oban.Met.Values.Gauge do
 
       iex> Gauge.quantile(Gauge.new([1, 2, 3]), 0.5)
       2
+
+  Without any values:
+
+      iex> Gauge.quantile(Gauge.new([]), 0.5)
+      nil
   """
-  @spec quantile(t(), float()) :: non_neg_integer()
+  @spec quantile(t(), float()) :: nil | non_neg_integer()
   def quantile(%Gauge{data: data}, ntile) do
     length = length(data) - 1
 
