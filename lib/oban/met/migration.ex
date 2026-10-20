@@ -62,11 +62,11 @@ defmodule Oban.Met.Migration do
 
   ## Example
 
-  Run all migrations up to the current version:
+  Remove the estimate function:
 
       Oban.Met.Migration.down()
 
-  Run migrations in an alternate prefix:
+  Remove the estimate function from an alternate prefix:
 
       Oban.Met.Migration.down(prefix: "payments")
   """

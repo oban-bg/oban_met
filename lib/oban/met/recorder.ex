@@ -87,7 +87,7 @@ defmodule Oban.Met.Recorder do
     |> :lists.usort()
   end
 
-  @spec latest(GenServer.name(), series(), keyword()) :: %{optional(String.t()) => value()}
+  @spec latest(GenServer.name(), series(), keyword()) :: %{optional(String.t()) => number()}
   def latest(name, series, opts \\ []) do
     opts = Keyword.validate!(opts, @default_latest_opts)
 
@@ -129,7 +129,8 @@ defmodule Oban.Met.Recorder do
     |> Enum.sort_by(& &1.series)
   end
 
-  @spec timeslice(GenServer.name(), series(), keyword()) :: [{ts(), value(), label()}]
+  @spec timeslice(GenServer.name(), series(), keyword()) ::
+          [{ts(), nil | number(), nil | label()}]
   def timeslice(name, series, opts \\ []) do
     opts = Keyword.validate!(opts, [:since] ++ @default_timeslice_opts)
 
