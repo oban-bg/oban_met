@@ -9,7 +9,20 @@ defmodule Oban.Met.Reporter do
 
   use GenServer
 
-  import Ecto.Query, only: [from: 2, group_by: 3, select: 3, where: 3]
+  import Ecto.Query,
+    only: [
+      dynamic: 1,
+      dynamic: 2,
+      from: 2,
+      group_by: 3,
+      recursive_ctes: 2,
+      select: 3,
+      subquery: 1,
+      union_all: 2,
+      where: 2,
+      where: 3,
+      with_cte: 3
+    ]
 
   alias __MODULE__, as: State
   alias Oban.{Job, Notifier, Peer, Repo}
@@ -164,13 +177,57 @@ defmodule Oban.Met.Reporter do
 
   defp cache_queues(state) do
     if Integer.mod(state.check_counter, 60) == 0 do
-      source = if state.conf.engine in @pro_engines, do: "oban_producers", else: "oban_jobs"
-      query = from(p in source, select: p.queue, distinct: true)
-
-      %{state | queues: Repo.all(state.conf, query)}
+      %{state | queues: fetch_queues(state.conf)}
     else
       state
     end
+  end
+
+  defp fetch_queues(%{engine: engine} = conf) when engine in @pro_engines do
+    Repo.all(conf, from(p in "oban_producers", select: p.queue, distinct: true))
+  end
+
+  defp fetch_queues(%{engine: Oban.Engines.Dolphin} = conf) do
+    query = from(j in Job, select: {j.state, j.queue}, distinct: true)
+
+    for {_state, queue} <- Repo.all(conf, query), uniq: true, do: queue
+  end
+
+  defp fetch_queues(conf) do
+    initial = from(p in subquery(queue_probes(dynamic(true))), select: %{queue: min(p.queue)})
+
+    following =
+      from(q in "queues",
+        as: :queues,
+        where: not is_nil(q.queue),
+        select: %{
+          queue:
+            subquery(
+              from(p in subquery(queue_probes(dynamic([j], j.queue > parent_as(:queues).queue))),
+                select: min(p.queue)
+              )
+            )
+        }
+      )
+
+    query =
+      from(q in "queues", where: not is_nil(q.queue), select: q.queue)
+      |> recursive_ctes(true)
+      |> with_cte("queues", as: ^union_all(initial, ^following))
+
+    Repo.all(conf, query)
+  end
+
+  defp queue_probes(condition) do
+    [first | rest] =
+      for state <- Map.keys(@empty_states) do
+        Job
+        |> where([j], j.state == ^state)
+        |> where(^condition)
+        |> select([j], %{queue: min(j.queue)})
+      end
+
+    Enum.reduce(rest, first, &union_all(&2, ^&1))
   end
 
   defp checks(%{estimate_limit: limit} = state) do

@@ -18,7 +18,10 @@ defmodule Oban.Met.ReporterTest do
           Job.new(%{}, queue: queue, worker: worker)
         end
 
-      Oban.insert_all(conf.name, changesets)
+      # Queue discovery walks states independently, so include a queue that only has completed jobs.
+      completed = Job.new(%{}, queue: "delta", state: "completed", worker: "Worker.A")
+
+      Oban.insert_all(conf.name, [completed | changesets])
 
       Notifier.listen(conf.name, [:metrics])
       send(pid, :checkpoint)
@@ -29,8 +32,8 @@ defmodule Oban.Met.ReporterTest do
       assert %{"metrics" => metrics, "time" => _} = payload
 
       assert ~w(full_count) = utake(metrics, "series")
-      assert ~w(available) = utake(metrics, "state")
-      assert ~w(alpha gamma) = utake(metrics, "queue")
+      assert ~w(available completed) = utake(metrics, "state")
+      assert ~w(alpha delta gamma) = utake(metrics, "queue")
     end
 
     @tag oban_opts: [peer: Oban.Peers.Isolated, prefix: "private", testing: :disabled]
